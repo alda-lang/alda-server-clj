@@ -4,9 +4,7 @@
                     ; dev
                     [adzerk/bootlaces    "0.1.13" :scope "test"]
                     [adzerk/boot-test    "1.0.4"  :scope "test"]
-
-                    ; alda.core
-                    [alda/core           "0.0.1"]
+                    [alda/core           "0.0.1"  :scope "test"]
 
                     ; server / worker
                     [org.clojure/clojure "1.8.0"]
