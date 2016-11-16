@@ -2,7 +2,7 @@
   (:require [clojure.test  :refer :all]
             [cheshire.core :as    json]
             [alda.worker   :as    worker]
-            [alda.util     :as    util]
+            [alda.zmq-util :refer (find-open-port)]
             [alda.version  :refer (-version-)])
   (:import [org.zeromq ZMQ ZContext ZMsg]))
 
@@ -44,7 +44,7 @@
 (use-fixtures :once
   (fn [run-tests]
     (init! #'*zmq-context* (ZContext. 1))
-    (init! #'*port*        (util/find-open-port))
+    (init! #'*port*        (find-open-port))
     (init! #'*socket*      (doto (.createSocket *zmq-context* ZMQ/DEALER)
                              (.bind (format "tcp://*:%s" *port*))))
     (future

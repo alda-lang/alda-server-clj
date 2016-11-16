@@ -3,7 +3,8 @@
             [cheshire.core :as    json]
             [alda.server   :as    server]
             [alda.util     :as    util]
-            [alda.version  :refer (-version-)])
+            [alda.version  :refer (-version-)]
+            [alda.zmq-util :refer (find-open-port)])
   (:import [org.zeromq ZMQ ZContext ZMsg]))
 
 (def ^:dynamic *zmq-context*     nil)
@@ -83,7 +84,7 @@
 (use-fixtures :once
   (fn [run-tests]
     (init! #'*zmq-context*     (ZContext. 1))
-    (init! #'*frontend-port*   (util/find-open-port))
+    (init! #'*frontend-port*   (find-open-port))
     (init! #'*frontend-socket* (doto (.createSocket *zmq-context* ZMQ/DEALER)
                                  (.connect (format "tcp://*:%s" *frontend-port*))))
     (start-server!)

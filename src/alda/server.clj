@@ -1,6 +1,8 @@
 (ns alda.server
-  (:require [alda.util                 :as    util]
+  (:require [alda.queue                :as    q]
+            [alda.util                 :as    util]
             [alda.version              :refer (-version-)]
+            [alda.zmq-util             :refer (find-open-port respond-to)]
             [cheshire.core             :as    json]
             [me.raynes.conch.low-level :as    sh]
             [taoensso.timbre           :as    log]
@@ -38,7 +40,7 @@
   {:address address
    :expiry  (worker-expiration-date)})
 
-(def available-workers (util/queue))
+(def available-workers (q/queue))
 (def busy-workers      (ref #{}))
 (def worker-blacklist  (ref #{}))
 (defn all-workers []   (->> @available-workers
@@ -104,25 +106,25 @@
   [address]
   (dosync
     (alter busy-workers disj address)
-    (util/remove-from-queue available-workers #(= address (:address %)))))
+    (q/remove-from-queue available-workers #(= address (:address %)))))
 
 (defn add-or-requeue-worker
   [address]
   (dosync
     (remove-worker-from-queue address)
-    (util/push-queue available-workers (worker address))))
+    (q/push-queue available-workers (worker address))))
 
 (defn note-that-worker-is-busy
   [address]
   (dosync
-    (util/remove-from-queue available-workers #(= address (:address %)))
+    (q/remove-from-queue available-workers #(= address (:address %)))
     (alter busy-workers conj address)))
 
 (defn fire-lazy-workers!
   []
   (dosync
-    (util/remove-from-queue available-workers
-                            #(< (:expiry %) (System/currentTimeMillis)))))
+    (q/remove-from-queue available-workers
+                         #(< (:expiry %) (System/currentTimeMillis)))))
 
 (defn blacklist-worker!
   [address]
@@ -151,7 +153,7 @@
    worker will stop getting heartbeats from the server and shut itself down."
   []
   (dosync
-    (let [{:keys [address]} (util/reverse-pop-queue available-workers)]
+    (let [{:keys [address]} (q/reverse-pop-queue available-workers)]
       (blacklist-worker! address))))
 
 (defn start-workers!
@@ -230,7 +232,7 @@
 (defn start-server!
   [workers frontend-port & [verbose?]]
   (util/set-log-level! (if verbose? :debug :info))
-  (let [backend-port    (util/find-open-port)
+  (let [backend-port    (find-open-port)
         zmq-ctx         (zmq/zcontext)
         poller          (zmq/poller zmq-ctx 2)
         last-heartbeat  (atom (System/currentTimeMillis))
@@ -283,7 +285,7 @@
               (case cmd
                 ; the server responds directly to certain commands
                 "ping"
-                (util/respond-to msg frontend pong-response)
+                (respond-to msg frontend pong-response)
 
                 "play-status"
                 (do
@@ -297,18 +299,18 @@
                     (.send msg backend)))
 
                 "status"
-                (util/respond-to msg frontend
-                                 (status-response (count @available-workers)
-                                                  workers
-                                                  backend-port))
+                (respond-to msg frontend
+                            (status-response (count @available-workers)
+                                             workers
+                                             backend-port))
 
                 "stop-server"
                 (do
-                  (util/respond-to msg frontend shutting-down-response)
+                  (respond-to msg frontend shutting-down-response)
                   (shut-down! backend))
 
                 "version"
-                (util/respond-to msg frontend version-response)
+                (respond-to msg frontend version-response)
 
                 ; any other message is forwarded to the next available
                 ; worker
@@ -317,7 +319,7 @@
                   (do
                     (log/debug "Receiving message from frontend...")
                     (let [{:keys [address]}
-                          (dosync (util/pop-queue available-workers))]
+                          (dosync (q/pop-queue available-workers))]
                       (log/debugf "Forwarding message to worker %s..." address)
                       (.push msg address)
                       (.send msg backend)))
@@ -328,15 +330,15 @@
                   (do
                     (log/debug (str "All workers are currently busy. "
                                     "Letting the client know..."))
-                    (util/respond-to msg frontend
-                                     all-workers-are-busy-response))
+                    (respond-to msg frontend
+                                all-workers-are-busy-response))
 
                   :else
                   (do
                     (log/debug (str "Workers not ready yet. "
                                     "Letting the client know..."))
-                    (util/respond-to msg frontend
-                                     no-workers-available-response)))))))
+                    (respond-to msg frontend
+                                no-workers-available-response)))))))
 
         ; purge workers we haven't heard from in too long
         (fire-lazy-workers!)

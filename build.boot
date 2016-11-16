@@ -1,28 +1,23 @@
 (set-env!
   :source-paths   #{"src" "test"}
-  :resource-paths #{"grammar" "examples"}
   :dependencies   '[
                     ; dev
-                    [adzerk/bootlaces "0.1.13" :scope "test"]
-                    [adzerk/boot-test "1.0.4"  :scope "test"]
+                    [adzerk/bootlaces       "0.1.13" :scope "test"]
+                    [adzerk/boot-test       "1.0.4"  :scope "test"]
+
+                    ; alda.core
+                    [alda/core              "0.0.1"]
 
                     ; server / worker
                     [org.clojure/clojure    "1.8.0"]
-                    [instaparse             "1.4.1"]
-                    [io.aviso/pretty        "0.1.20"]
                     [com.taoensso/timbre    "4.1.1"]
                     [cheshire               "5.6.3"]
-                    [djy                    "0.1.4"]
-                    [jline                  "2.12.1"]
-                    [org.clojars.sidec/jsyn "16.7.3"]
-                    [potemkin               "0.4.1"]
                     [org.zeromq/cljzmq      "0.1.4" :exclusions (org.zeromq/jzmq)]
-                    [me.raynes/conch        "0.8.0"]
-                    [clj_manifest           "0.2.0"]
-                    [org.zeromq/jeromq      "0.3.5"]])
+                    [org.zeromq/jeromq      "0.3.5"]
+                    [me.raynes/conch        "0.8.0"]])
 
 (require '[adzerk.bootlaces :refer :all]
-         '[adzerk.boot-test])
+         '[adzerk.boot-test :refer :all])
 
 (def ^:const +version+ "0.0.1")
 
@@ -41,69 +36,13 @@
 
   install {:pom "alda/server-clj"}
 
-  target  {:dir #{"target"}})
+  target  {:dir #{"target"}}
 
-(deftask heading
-  [t text TEXT str "The text to display."]
-  (with-pass-thru fs
-    (println)
-    (println "---" text "---")))
-
-(deftask unit-tests
-  []
-  (comp (heading :text "UNIT TESTS")
-        (adzerk.boot-test/test
-          :namespaces '#{; general tests
-                         alda.parser.barlines-test
-                         alda.parser.clj-exprs-test
-                         alda.parser.event-sequences-test
-                         alda.parser.comments-test
-                         alda.parser.duration-test
-                         alda.parser.events-test
-                         alda.parser.octaves-test
-                         alda.parser.repeats-test
-                         alda.parser.score-test
-                         alda.parser.variables-test
-                         alda.lisp.attributes-test
-                         alda.lisp.cram-test
-                         alda.lisp.chords-test
-                         alda.lisp.code-test
-                         alda.lisp.duration-test
-                         alda.lisp.global-attributes-test
-                         alda.lisp.markers-test
-                         alda.lisp.notes-test
-                         alda.lisp.parts-test
-                         alda.lisp.pitch-test
-                         alda.lisp.score-test
-                         alda.lisp.variables-test
-                         alda.lisp.voices-test
-                         alda.util-test
-
-                         ; benchmarks / smoke tests
-                         alda.examples-test})))
-
-(deftask integration-tests
-  []
-  (comp (heading :text "INTEGRATION TESTS")
-        (adzerk.boot-test/test
-          :namespaces '#{alda.server-test
-                         alda.worker-test})))
-
-(deftask test
-  [i integration bool "Run only integration tests."
-   a all         bool "Run all tests."]
-  (cond
-    all         (comp (unit-tests)
-                      (integration-tests))
-    integration (integration-tests)
-    :default    (unit-tests)))
+  test    {:namespaces '#{alda.server-test
+                          alda.worker-test}})
 
 (deftask dev
-  "Runs the Alda server (default), worker, or REPL for development.
-
-   *** REPL ***
-
-   Simply run `boot dev -a repl` and you're in!
+  "Runs the Alda server (default) or worker for development.
 
    *** SERVER ***
 
@@ -142,17 +81,13 @@
                                "The --port option is mandatory for workers.")
                              (require 'alda.worker)
                              (require 'alda.util)
-                             ((resolve 'alda.worker/start-worker!) port true))
-            start-repl!    (fn []
-                             (require 'alda.repl)
-                             ((resolve 'alda.repl/start-repl!)))]
+                             ((resolve 'alda.worker/start-worker!) port true))]
         (case app
           nil      (start-server!)
           "server" (start-server!)
           "worker" (start-worker!)
-          "repl"   (start-repl!)
           (do
-            (println "ERROR: -a/--app must be server, worker or repl")
+            (println "ERROR: -a/--app must be server or worker")
             (System/exit 1)))))
     (wait)))
 

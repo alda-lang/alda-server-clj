@@ -4,6 +4,7 @@
             [alda.sound      :as    sound :refer (*play-opts*)]
             [alda.sound.midi :as    midi]
             [alda.util       :as    util]
+            [alda.zmq-util   :refer (respond-to)]
             [alda.version    :refer (-version-)]
             [cheshire.core   :as    json]
             [clojure.pprint  :refer (pprint)]
@@ -198,13 +199,13 @@
                     (let [req (json/parse-string body true)
                           res (json/generate-string (process req))]
                       (log/debug "Sending response...")
-                      (util/respond-to msg socket res envelope)
+                      (respond-to msg socket res envelope)
                       (log/debug "Response sent."))
                     (catch Throwable e
                       (log/error e e)
                       (log/info "Sending error response...")
                       (let [err (json/generate-string (error-response e))]
-                        (util/respond-to msg socket err envelope))
+                        (respond-to msg socket err envelope))
                       (log/info "Error response sent.")))))
 
               :else
