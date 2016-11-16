@@ -5,7 +5,6 @@
                     ; dev
                     [adzerk/bootlaces "0.1.13" :scope "test"]
                     [adzerk/boot-test "1.0.4"  :scope "test"]
-                    [str-to-argv      "0.1.0"  :score "test"]
 
                     ; server / worker
                     [org.clojure/clojure    "1.8.0"]
