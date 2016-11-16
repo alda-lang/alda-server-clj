@@ -129,7 +129,6 @@
    w workers          WORKERS int  "The number of workers for the server to start."
    F alda-fingerprint         bool "Allow the Alda client to identify this as an Alda process."]
   (comp
-    (javac)
     (with-pass-thru fs
       (let [start-server!  (fn []
                              (require 'alda.server)
