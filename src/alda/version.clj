@@ -4,4 +4,5 @@
             [manifest.core   :refer (manifest)]))
 
 (def ^:const -version-
-  (:alda-version (manifest "alda.Main")))
+  (or (:alda-version (manifest "alda.Main"))
+      "unknown / development version"))
