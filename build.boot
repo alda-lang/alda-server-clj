@@ -31,9 +31,9 @@
 (task-options!
   pom     {:project 'alda/server-clj
            :version +version+
-           :description "A music programming language for musicians"
-           :url "https://github.com/alda-lang/alda"
-           :scm {:url "https://github.com/alda-lang/alda"}
+           :description "A Clojure implementation of an Alda server"
+           :url "https://github.com/alda-lang/alda-server-clj"
+           :scm {:url "https://github.com/alda-lang/alda-server-clj"}
            :license {"name" "Eclipse Public License"
                      "url" "http://www.eclipse.org/legal/epl-v10.html"}}
 
