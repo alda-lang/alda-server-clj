@@ -60,7 +60,7 @@
 
    Starts a worker process that will receive requests from the socket on the
    port specified by the -p/--port option. This option is required."
-  [a app              APP     str  "The Alda application to run (server, repl or client)."
+  [a app              APP     str  "The Alda application to run (server or worker)."
    x args             ARGS    str  "The string of CLI args to pass to the client."
    p port             PORT    int  "The port on which to start the server/worker."
    w workers          WORKERS int  "The number of workers for the server to start."
