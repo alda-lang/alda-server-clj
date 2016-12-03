@@ -4,13 +4,11 @@
             [alda.sound      :as    sound :refer (*play-opts*)]
             [alda.sound.midi :as    midi]
             [alda.util       :as    util]
-            [alda.zmq-util   :refer (respond-to)]
             [alda.version    :refer (-version-)]
             [cheshire.core   :as    json]
             [clojure.pprint  :refer (pprint)]
             [taoensso.timbre :as    log]
-            [zeromq.zmq      :as    zmq])
-  (:import [org.zeromq ZFrame ZMQ ZMsg]))
+            [ezzmq.core      :as    zmq]))
 
 (def ^:dynamic *no-system-exit* false)
 
@@ -153,86 +151,92 @@
   (start-alda-environment!)
   (log/info "Worker reporting for duty!")
   (log/infof "Connecting to socket on port %d..." port)
-  (let [zmq-ctx        (zmq/zcontext)
-        poller         (zmq/poller zmq-ctx 1)
-        running?       (atom true)
-        last-heartbeat (atom (System/currentTimeMillis))]
-    (with-open [socket (doto (zmq/socket zmq-ctx :dealer)
-                         (zmq/connect (str "tcp://*:" port))) ]
+  (zmq/with-new-context
+    (let [running?       (atom true)
+          last-heartbeat (atom (System/currentTimeMillis))
+          socket         (zmq/socket :dealer {:connect (str "tcp://*:" port)})]
+
+      (zmq/after-shutdown
+        (log/info "Shutting down."))
+
       (log/info "Sending READY signal.")
-      (.send (ZFrame. "READY") socket 0)
+      (zmq/send-msg socket "READY")
 
-      (zmq/register poller socket :pollin)
+      (zmq/polling {:stringify false}
+        [socket :pollin [msg]
+         (do
+           (cond
+           ; the server sends 1-frame messages as signals
+           (= 1 (count msg))
+           (let [signal (-> msg first (String.))]
+             (case signal
+               "KILL"      (do
+                             (log/info "Received KILL signal from server.")
+                             (reset! running? false))
+               "HEARTBEAT" (do
+                             (log/debug "Got HEARTBEAT from server.")
+                             (reset! lives MAX-LIVES))
+               (log/errorf "Invalid signal: %s" signal)))
 
-      (while (and @running? (not (.. Thread currentThread isInterrupted)))
-        (zmq/poll poller HEARTBEAT-INTERVAL)
-        (if (zmq/check-poller poller 0 :pollin)
-          (when-let [msg (ZMsg/recvMsg socket ZMQ/DONTWAIT)]
+           ; the server also forwards 3-frame messages from the client
+           ; Frames:
+           ;   1) the return address of the client
+           ;   2) a JSON string representing the client's request
+           ;   3) the command as a string (for use by the server)
+           (= 3 (count msg))
+           (let [[return-address body command] msg
+                 body    (String. body)
+                 command (String. command)]
+             (if (and (not= :available @current-status)
+                      (not= "play-status" command))
+               (log/debug "Ignoring message. I'm busy.")
+               (try
+                 (log/debug "Processing message...")
+                 (let [req (json/parse-string body true)
+                       res (json/generate-string (process req))]
+                   (log/debug "Sending response...")
+                   (zmq/send-msg socket [return-address "" res])
+                   (log/debug "Response sent."))
+                 (catch Throwable e
+                   (log/error e e)
+                   (log/info "Sending error response...")
+                   (let [err (json/generate-string (error-response e))]
+                     (zmq/send-msg socket [return-address "" err]))
+                   (log/info "Error response sent.")))))
+
+           :else
+           (log/errorf "Invalid message: %s" (mapv #(String. %) msg))))]
+
+        (while (and (zmq/polling?) @running?)
+          (let [got-msgs (zmq/poll HEARTBEAT-INTERVAL)]
             (cond
-              ; the server sends 1-frame messages as signals
-              (= 1 (.size msg))
-              (let [frame (.getFirst msg)
-                    data  (String. (.getData frame))]
-                (case data
-                  "KILL"      (do
-                                (log/info "Received KILL signal from server.")
-                                (reset! running? false))
-                  "HEARTBEAT" (do
-                                (log/debug "Got HEARTBEAT from server.")
-                                (reset! lives MAX-LIVES))
-                  (log/errorf "Invalid message: %s" data)))
+              ; if a heartbeat wasn't received from the server within the
+              ; acceptable threshold, MAX-LIVES times in a row, conclude that
+              ; the server has stopped sending heartbeats and shut down
+              (not (contains? got-msgs 0))
+              (do
+                (swap! lives dec)
+                (when (and (<= @lives 0) (= :available @current-status))
+                  (log/error "Unable to reach the server.")
+                  (reset! running? false)))
 
-              ; the server also forwards 3-frame messages from the client
-              ; Frames:
-              ;   1) the return address of the client
-              ;   2) a JSON string representing the client's request
-              ;   3) the command as a string (for use by the server)
-              (= 3 (.size msg))
-              (let [envelope (.unwrap msg)
-                    command  (-> msg .getLast .getData (String.))
-                    body     (-> msg .pop .getData (String.))]
-                (if (and (not= :available @current-status)
-                         (not= "play-status" command))
-                  (log/debug "Ignoring message. I'm busy.")
-                  (try
-                    (log/debug "Processing message...")
-                    (let [req (json/parse-string body true)
-                          res (json/generate-string (process req))]
-                      (log/debug "Sending response...")
-                      (respond-to msg socket res envelope)
-                      (log/debug "Response sent."))
-                    (catch Throwable e
-                      (log/error e e)
-                      (log/info "Sending error response...")
-                      (let [err (json/generate-string (error-response e))]
-                        (respond-to msg socket err envelope))
-                      (log/info "Error response sent.")))))
-
-              :else
-              (log/errorf "Invalid message: %s" msg)))
-          (do
-            (swap! lives dec)
-            (when (and (<= @lives 0) (= :available @current-status))
-              (log/error "Unable to reach the server.")
-              (reset! running? false))))
-
-        ; detect when the system has been suspended and stop working so the
-        ; server can replace it with a fresh worker (this fixes a bug where
-        ; MIDI audio is delayed)
-        (when (> (System/currentTimeMillis)
+              ; detect when the system has been suspended and stop working so
+              ; the server can replace it with a fresh worker (this fixes a bug
+              ; where MIDI audio is delayed)
+              (> (System/currentTimeMillis)
                  (+ @last-heartbeat SUSPENDED-INTERVAL))
-          (log/info "Process suspension detected. Shutting down...")
-          (reset! last-heartbeat (System/currentTimeMillis))
-          (reset! running? false))
+              (do
+                (log/info "Process suspension detected. Shutting down...")
+                (reset! last-heartbeat (System/currentTimeMillis))
+                (reset! running? false)))
 
-        (when (> (System/currentTimeMillis)
-                 (+ @last-heartbeat HEARTBEAT-INTERVAL))
-          (.send (ZFrame. (if (= :available @current-status)
-                            "AVAILABLE"
-                            "BUSY"))
-                 socket
-                 0)
-          (reset! last-heartbeat (System/currentTimeMillis)))))
-    (log/info "Shutting down.")
-    (exit! 0)))
+            ; send AVAILABLE/BUSY status back to the server
+            (when (and @running?
+                       (> (System/currentTimeMillis)
+                          (+ @last-heartbeat HEARTBEAT-INTERVAL)))
+              (zmq/send-msg socket (if (= :available @current-status)
+                                     "AVAILABLE"
+                                     "BUSY"))
+              (reset! last-heartbeat (System/currentTimeMillis))))))))
+  (exit! 0))
 

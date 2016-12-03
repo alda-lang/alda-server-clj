@@ -4,12 +4,11 @@
             [alda.version              :refer (-version-)]
             [alda.zmq-util             :refer (find-open-port respond-to)]
             [cheshire.core             :as    json]
+            [ezzmq.core                :as    zmq]
             [me.raynes.conch.low-level :as    sh]
-            [taoensso.timbre           :as    log]
-            [zeromq.device             :as    zmqd]
-            [zeromq.zmq                :as    zmq])
+            [taoensso.timbre           :as    log])
   (:import [java.util.concurrent ConcurrentLinkedQueue]
-           [org.zeromq ZFrame ZMQException ZMQ$Error ZMsg]))
+           [org.zeromq ZMQException]))
 
 (def ^:dynamic *no-system-exit* false)
 
@@ -52,7 +51,6 @@
 (defn- friendly-id
   [address]
   (->> address
-       .getData
        (map int)
        (apply str)))
 
@@ -202,16 +200,16 @@
       (log/debug "Supervisor approves of the current number of workers."))))
 
 (defn murder-workers!
-  [backend]
+  [backend shutting-down?]
   (doseq [{:keys [address]} (all-workers)]
-    (.send address backend (+ ZFrame/REUSE ZFrame/MORE))
-    (.send (ZFrame. "KILL") backend 0)
-    (blacklist-worker! address)))
+    (zmq/send-msg backend [address "KILL"])
+    (when-not shutting-down?
+      (blacklist-worker! address))))
 
 (defn cycle-workers!
   [backend port workers]
   ; kill workers (this might only get the busy ones)
-  (murder-workers! backend)
+  (murder-workers! backend false)
   ; wait for any stray zombie workers to wander in
   (Thread/sleep 500)
   ; clear out the worker queues
@@ -226,150 +224,141 @@
 (defn shut-down!
   [backend]
   (log/info "Murdering workers...")
-  (murder-workers! backend)
+  (murder-workers! backend true)
   (reset! running? false))
 
 (defn start-server!
   [workers frontend-port & [verbose?]]
   (util/set-log-level! (if verbose? :debug :info))
-  (let [backend-port    (find-open-port)
-        zmq-ctx         (zmq/zcontext)
-        poller          (zmq/poller zmq-ctx 2)
-        last-heartbeat  (atom (System/currentTimeMillis))
-        last-supervised (atom (System/currentTimeMillis))]
-    (log/infof "Binding frontend socket on port %s..." frontend-port)
-    (log/infof "Binding backend socket on port %s..." backend-port)
-    (with-open [frontend (try
-                           (doto (zmq/socket zmq-ctx :router)
-                             (zmq/bind (str "tcp://*:" frontend-port)))
-                           (catch ZMQException e
-                             (if (= 48 (.getErrorCode e))
-                               (log/error
-                                 (str "There is already an Alda server "
-                                      "running on this port."))
-                               (throw e))
-                             (exit! 1)))
-                backend  (doto (zmq/socket zmq-ctx :router)
-                           (zmq/bind (str "tcp://*:" backend-port)))]
-      (zmq/register poller frontend :pollin)
-      (zmq/register poller backend :pollin)
+  (zmq/with-new-context
+    (let [backend-port    (find-open-port)
+          last-heartbeat  (atom (System/currentTimeMillis))
+          last-supervised (atom (System/currentTimeMillis))
+          _               (log/infof "Binding frontend socket on port %s..."
+                                     frontend-port)
+          frontend        (try
+                            (zmq/socket
+                              :router
+                              {:bind (str "tcp://*:" frontend-port)})
+                            (catch ZMQException e
+                              (if (= 48 (.getErrorCode e))
+                                (log/error
+                                  (str "There is already an Alda server "
+                                       "running on this port."))
+                                (throw e))
+                              (exit! 1)))
+          _               (log/infof "Binding backend socket on port %s..."
+                                     backend-port)
+          backend         (zmq/socket
+                            :router
+                            {:bind (str "tcp://*:" backend-port)})]
+
+      (zmq/before-shutdown
+        (log/info "Interrupt (e.g. Ctrl-C) received.")
+        (when @running? (shut-down! backend))
+        (log/info "Shutting down..."))
+
+      (zmq/after-shutdown
+        (log/info "Exiting."))
+
       (log/infof "Spawning %s workers..." workers)
       (start-workers! workers backend-port)
-      (.addShutdownHook (Runtime/getRuntime)
-                        (Thread. (fn []
-                                   (when @running?
-                                     (log/info "Interrupt (e.g. Ctrl-C) received.")
-                                     (shut-down! backend)))))
-      (while @running?
-        (zmq/poll poller HEARTBEAT-INTERVAL)
-        (when (zmq/check-poller poller 1 :pollin) ; backend
-          (when-let [msg (ZMsg/recvMsg backend)]
-            (let [address (.unwrap msg)]
-              (if (= 1 (.size msg))
-                (let [frame   (.getFirst msg)
-                      data    (-> frame .getData (String.))]
-                  (when-not (contains? @worker-blacklist address)
-                    (case data
-                      "BUSY"      (note-that-worker-is-busy address)
-                      "AVAILABLE" (add-or-requeue-worker address)
-                      "READY"     (add-or-requeue-worker address)
-                      "DONE"      (remove-worker-from-queue address)
-                      (log/errorf "Invalid message: %s" data))))
-                (do
-                  (log/debug "Forwarding backend response to frontend...")
-                  (.add msg address)
-                  (.send msg frontend))))))
-        (when (zmq/check-poller poller 0 :pollin) ; frontend
-          (when-let [msg (ZMsg/recvMsg frontend)]
-            (let [cmd (-> msg .getLast .getData (String.))]
-              (case cmd
-                ; the server responds directly to certain commands
-                "ping"
-                (respond-to msg frontend pong-response)
 
-                "play-status"
-                (do
-                  (let [client-address (.pop msg)
-                        request        (.pop msg)
-                        address        (.pop msg)]
-                    (log/debugf "Forwarding message to worker %s..." address)
-                    (.push msg request)
-                    (.push msg client-address)
-                    (.push msg address)
-                    (.send msg backend)))
+      (zmq/polling {:stringify false}
+        [backend :pollin [[address & msg]]
+         (if (= 1 (count msg))
+           (let [signal (-> msg first (String.))]
+             (when-not (contains? @worker-blacklist address)
+               (case signal
+                 "BUSY"      (note-that-worker-is-busy address)
+                 "AVAILABLE" (add-or-requeue-worker address)
+                 "READY"     (add-or-requeue-worker address)
+                 "DONE"      (remove-worker-from-queue address)
+                 (log/errorf "Invalid signal: %s" signal))))
+           (do
+             (log/debug "Forwarding backend response to frontend...")
+             (zmq/send-msg frontend (conj (vec msg) address))))
 
-                "status"
-                (respond-to msg frontend
-                            (status-response (count @available-workers)
-                                             workers
-                                             backend-port))
+         frontend :pollin [msg]
+         (let [cmd (-> msg last (String.))]
+           (case cmd
+             ; the server responds directly to certain commands
+             "ping"
+             (respond-to msg frontend pong-response)
 
-                "stop-server"
-                (do
-                  (respond-to msg frontend shutting-down-response)
-                  (shut-down! backend))
+             "play-status"
+             (let [[client-address request address] msg]
+               (log/debugf "Forwarding message to worker %s..."
+                           (friendly-id address))
+               (zmq/send-msg backend [address client-address request cmd]))
 
-                "version"
-                (respond-to msg frontend version-response)
+             "status"
+             (respond-to msg frontend
+                         (status-response (count @available-workers)
+                                          workers
+                                          backend-port))
 
-                ; any other message is forwarded to the next available
-                ; worker
-                (cond
-                  (not (empty? @available-workers))
-                  (do
-                    (log/debug "Receiving message from frontend...")
-                    (let [{:keys [address]}
-                          (dosync (q/pop-queue available-workers))]
-                      (log/debugf "Forwarding message to worker %s..." address)
-                      (.push msg address)
-                      (.send msg backend)))
+             "stop-server"
+             (do
+               (respond-to msg frontend shutting-down-response)
+               (shut-down! backend))
 
-                  ; if no workers are available, respond immediately so the
-                  ; client isn't left waiting
-                  (not (empty? @busy-workers))
-                  (do
-                    (log/debug (str "All workers are currently busy. "
-                                    "Letting the client know..."))
-                    (respond-to msg frontend
-                                all-workers-are-busy-response))
+             "version"
+             (respond-to msg frontend version-response)
 
-                  :else
-                  (do
-                    (log/debug (str "Workers not ready yet. "
-                                    "Letting the client know..."))
-                    (respond-to msg frontend
-                                no-workers-available-response)))))))
+             ; any other message is forwarded to the next available
+             ; worker
+             (cond
+               (not (empty? @available-workers))
+               (let [{:keys [address]}
+                     (dosync (q/pop-queue available-workers))]
+                 (log/debugf "Forwarding message to worker %s..."
+                             (friendly-id address))
+                 (zmq/send-msg backend (vec (cons address msg))))
 
-        ; purge workers we haven't heard from in too long
-        (fire-lazy-workers!)
+               ; if no workers are available, respond immediately so the
+               ; client isn't left waiting
+               (not (empty? @busy-workers))
+               (do
+                 (log/debug (str "All workers are currently busy. "
+                                 "Letting the client know..."))
+                 (respond-to msg frontend
+                             all-workers-are-busy-response))
 
-        ; detect when the system has been suspended and cycle workers
-        ; (fixes a bug where MIDI audio is delayed)
-        (when (> (System/currentTimeMillis)
-                 (+ @last-heartbeat SUSPENDED-INTERVAL))
-          (log/info "Process suspension detected. Cycling workers...")
-          (cycle-workers! backend backend-port workers)
-          (reset! last-heartbeat  (System/currentTimeMillis))
-          (reset! last-supervised (System/currentTimeMillis)))
+               :else
+               (do
+                 (log/debug (str "Workers not ready yet. "
+                                 "Letting the client know..."))
+                 (respond-to msg frontend
+                             no-workers-available-response)))))]
 
-        ; make sure we still have the desired number of workers
-        (when (> (System/currentTimeMillis)
-                 (+ @last-supervised WORKER-CHECK-INTERVAL))
-          (reset! last-supervised (System/currentTimeMillis))
-          (when-not (System/getenv "ALDA_DISABLE_SUPERVISOR")
-            (supervise-workers! backend-port workers)))
+        (while @running?
+          (zmq/poll HEARTBEAT-INTERVAL)
 
-        ; send a heartbeat to all current workers
-        (when (> (System/currentTimeMillis)
-                 (+ @last-heartbeat HEARTBEAT-INTERVAL))
-          (reset! last-heartbeat (System/currentTimeMillis))
-          (doseq [{:keys [address]} (all-workers)]
-            (.send address backend (+ ZFrame/REUSE ZFrame/MORE))
-            (.send (ZFrame. "HEARTBEAT") backend 0))))
+          ; purge workers we haven't heard from in too long
+          (fire-lazy-workers!)
 
-      (log/info "Destroying zmq context...")
-      (zmq/destroy zmq-ctx)
+          ; detect when the system has been suspended and cycle workers
+          ; (fixes a bug where MIDI audio is delayed)
+          (when (> (System/currentTimeMillis)
+                   (+ @last-heartbeat SUSPENDED-INTERVAL))
+            (log/info "Process suspension detected. Cycling workers...")
+            (cycle-workers! backend backend-port workers)
+            (reset! last-heartbeat  (System/currentTimeMillis))
+            (reset! last-supervised (System/currentTimeMillis)))
 
-      (log/info "Exiting.")
-      (exit! 0))))
+          ; make sure we still have the desired number of workers
+          (when (> (System/currentTimeMillis)
+                   (+ @last-supervised WORKER-CHECK-INTERVAL))
+            (reset! last-supervised (System/currentTimeMillis))
+            (when-not (System/getenv "ALDA_DISABLE_SUPERVISOR")
+              (supervise-workers! backend-port workers)))
+
+          ; send a heartbeat to all current workers
+          (when (> (System/currentTimeMillis)
+                   (+ @last-heartbeat HEARTBEAT-INTERVAL))
+            (reset! last-heartbeat (System/currentTimeMillis))
+            (doseq [{:keys [address]} (all-workers)]
+              (zmq/send-msg backend [address "HEARTBEAT"])))))))
+  (exit! 0))
 

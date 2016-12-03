@@ -1,6 +1,6 @@
 (ns alda.zmq-util
-  (:import [java.net ServerSocket]
-           [org.zeromq ZMsg]))
+  (:require [ezzmq.core :as zmq])
+  (:import [java.net ServerSocket]))
 
 (defn find-open-port
   []
@@ -10,9 +10,6 @@
     port))
 
 (defn respond-to
-  [msg socket response & [envelope]]
-  (let [envelope (or envelope (.unwrap msg))
-        msg      (doto (ZMsg/newStringMsg (into-array String [response]))
-                   (.wrap envelope))]
-    (.send msg socket)))
+  [[address] socket response]
+  (zmq/send-msg socket [address "" response]))
 

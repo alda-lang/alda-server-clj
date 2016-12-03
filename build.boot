@@ -3,15 +3,14 @@
   :dependencies   '[
                     ; dev
                     [adzerk/bootlaces      "0.1.13" :scope "test"]
-                    [adzerk/boot-test      "1.0.4"  :scope "test"]
-                    [alda/core             "0.1.0"  :scope "test"]
+                    [adzerk/boot-test      "1.1.2"  :scope "test"]
+                    [alda/core             "0.1.1"  :scope "test"]
                     [alda/sound-engine-clj "0.1.0"  :scope "test"]
 
                     ; server / worker
-                    [com.taoensso/timbre "4.1.1"]
+                    [com.taoensso/timbre "4.7.4"]
                     [cheshire            "5.6.3"]
-                    [org.zeromq/cljzmq   "0.1.4" :exclusions (org.zeromq/jzmq)]
-                    [org.zeromq/jeromq   "0.3.5"]
+                    [io.djy/ezzmq        "0.5.1"]
                     [me.raynes/conch     "0.8.0"]])
 
 (require '[adzerk.bootlaces :refer :all]

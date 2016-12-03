@@ -1,13 +1,12 @@
 (ns alda.server-test
   (:require [clojure.test  :refer :all]
             [cheshire.core :as    json]
+            [ezzmq.core    :as    zmq]
             [alda.server   :as    server]
             [alda.util     :as    util]
             [alda.version  :refer (-version-)]
-            [alda.zmq-util :refer (find-open-port)])
-  (:import [org.zeromq ZMQ ZContext ZMsg]))
+            [alda.zmq-util :refer (find-open-port)]))
 
-(def ^:dynamic *zmq-context*     nil)
 (def ^:dynamic *frontend-port*   nil)
 (def ^:dynamic *backend-port*    nil)
 (def ^:dynamic *frontend-socket* nil)
@@ -19,50 +18,33 @@
 
 (defn start-server!
   []
-  (future
+  (zmq/worker-thread {:on-interrupt #(println "Server interrupted!")}
     (binding [server/*no-system-exit* true]
       (server/start-server! 2 *frontend-port*))))
 
-(defn receive-all
-  "Receives one frame, then keeps checking to see if there is more until there
-   are no more frames to receive. Returns the result as a vector of strings."
-  [socket]
-  (loop [frames [(.recv socket)]
-         more? (.hasReceiveMore socket)]
-    (if more?
-      (recur (conj frames (.recv socket))
-             (.hasReceiveMore socket))
-      frames)))
-
 (defn play-status-request
   [worker-address]
-  (doto (ZMsg.)
-    (.addString (json/generate-string {:command "play-status"}))
-    (.add worker-address)
-    (.addString "play-status")))
+  [(json/generate-string {:command "play-status"})
+   worker-address
+   "play-status"])
 
-(defn response-for-zmsg
-  [zmsg]
-  (.send zmsg *frontend-socket*)
-  (-> (receive-all *frontend-socket*)
+(defn response-for-msg
+  [msg]
+  (zmq/send-msg *frontend-socket* msg)
+  (-> (zmq/receive-msg *frontend-socket* :stringify true)
       second
-      (String.)
       (json/parse-string true)))
 
 (defn response-for
   [{:keys [command] :as req}]
-  (let [zmsg (doto (ZMsg.)
-               (.addString (json/generate-string req))
-               (.addString command))]
-    (response-for-zmsg zmsg)))
+  (let [msg [(json/generate-string req) command]]
+    (response-for-msg msg)))
 
 (defn complete-response-for
   [{:keys [command] :as req}]
-  (let [msg (doto (ZMsg.)
-              (.addString (json/generate-string req))
-              (.addString command))]
-    (.send msg *frontend-socket*))
-  (receive-all *frontend-socket*))
+  (let [msg [(json/generate-string req) command]]
+    (zmq/send-msg *frontend-socket* msg))
+  (zmq/receive-msg *frontend-socket* :stringify false))
 
 (defn get-backend-port
   []
@@ -83,16 +65,19 @@
 
 (use-fixtures :once
   (fn [run-tests]
-    (init! #'*zmq-context*     (ZContext. 1))
-    (init! #'*frontend-port*   (find-open-port))
-    (init! #'*frontend-socket* (doto (.createSocket *zmq-context* ZMQ/DEALER)
-                                 (.connect (format "tcp://*:%s" *frontend-port*))))
-    (start-server!)
-    (init! #'*backend-port*   (get-backend-port))
-    (init! #'*backend-socket* (doto (.createSocket *zmq-context* ZMQ/DEALER)
-                                 (.connect (format "tcp://*:%s" *backend-port*))))
-    (run-tests)
-    (.destroy *zmq-context*)))
+    (zmq/with-new-context
+      (init! #'*frontend-port*   (find-open-port))
+      (init! #'*frontend-socket* (zmq/socket
+                                   :dealer
+                                   {:connect (format "tcp://*:%s"
+                                                     *frontend-port*)}))
+      (start-server!)
+      (init! #'*backend-port*   (get-backend-port))
+      (init! #'*backend-socket* (zmq/socket
+                                  :dealer
+                                  {:connect (format "tcp://*:%s"
+                                                    *backend-port*)}))
+      (run-tests))))
 
 (deftest frontend-tests
   (testing "the 'ping' command"
@@ -153,7 +138,7 @@
             (not (nil? worker-address)))))
       (testing "the play-status command"
         (let [req (play-status-request worker-address)
-              {:keys [success pending body]} (response-for-zmsg req)]
+              {:keys [success pending body]} (response-for-msg req)]
           (testing "should get a successful response"
             (is success))
           (testing "should say the status is 'parsing' while the worker is parsing"
@@ -188,15 +173,12 @@
      signals.")
   (testing "the backend socket"
     (testing "can send and receive heartbeats"
-      (let [ready-signal (doto (ZMsg.) (.addString "READY"))]
-        (.send ready-signal *backend-socket*))
-      (let [msg (receive-all *backend-socket*)]
-        (is (= "HEARTBEAT" (-> msg first String.))))
+      (zmq/send-msg *backend-socket* "READY")
+      (let [[msg] (zmq/receive-msg *backend-socket* :stringify true)]
+        (is (= "HEARTBEAT" msg)))
       (dotimes [_ 5]
-        (let [heartbeat (doto (ZMsg.) (.addString "AVAILABLE"))]
-          (.send heartbeat *backend-socket*))
-        (let [msg (receive-all *backend-socket*)]
-          (is (= "HEARTBEAT" (-> msg first String.))))))
+        (zmq/send-msg *backend-socket* "AVAILABLE")
+        (let [[msg] (zmq/receive-msg *backend-socket* :stringify true)]
+          (is (= "HEARTBEAT" msg)))))
     (testing "can send DONE signal"
-      (let [done-signal (doto (ZMsg.) (.addString "DONE"))]
-        (.send done-signal *backend-socket*)))))
+      (zmq/send-msg *backend-socket* "DONE"))))
