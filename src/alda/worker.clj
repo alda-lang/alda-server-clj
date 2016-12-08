@@ -210,16 +210,6 @@
         (while (and (zmq/polling?) @running?)
           (let [got-msgs (zmq/poll HEARTBEAT-INTERVAL)]
             (cond
-              ; if a heartbeat wasn't received from the server within the
-              ; acceptable threshold, MAX-LIVES times in a row, conclude that
-              ; the server has stopped sending heartbeats and shut down
-              (not (contains? got-msgs 0))
-              (do
-                (swap! lives dec)
-                (when (and (<= @lives 0) (= :available @current-status))
-                  (log/error "Unable to reach the server.")
-                  (reset! running? false)))
-
               ; detect when the system has been suspended and stop working so
               ; the server can replace it with a fresh worker (this fixes a bug
               ; where MIDI audio is delayed)
@@ -228,7 +218,17 @@
               (do
                 (log/info "Process suspension detected. Shutting down...")
                 (reset! last-heartbeat (System/currentTimeMillis))
-                (reset! running? false)))
+                (reset! running? false))
+
+              ; if a heartbeat wasn't received from the server within the
+              ; acceptable threshold, MAX-LIVES times in a row, conclude that
+              ; the server has stopped sending heartbeats and shut down
+              (not (contains? got-msgs 0))
+              (do
+                (swap! lives dec)
+                (when (and (<= @lives 0) (= :available @current-status))
+                  (log/error "Unable to reach the server.")
+                  (reset! running? false))))
 
             ; send AVAILABLE/BUSY status back to the server
             (when (and @running?
