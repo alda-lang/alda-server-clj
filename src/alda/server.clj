@@ -210,8 +210,6 @@
   [backend port workers]
   ; kill workers (this might only get the busy ones)
   (murder-workers! backend false)
-  ; wait for any stray zombie workers to wander in
-  (Thread/sleep 500)
   ; clear out the worker queues
   (dosync
     (alter available-workers empty)
