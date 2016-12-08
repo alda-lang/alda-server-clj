@@ -1,5 +1,9 @@
 # CHANGELOG
 
+## 0.1.2 (12/7/16)
+
+* Fixed a regression introduced by 0.1.1. There was a bug causing worker processes not to cycle after suspending the process, e.g. closing and later re-opening your laptop's lid.
+
 ## 0.1.1 (12/3/16)
 
 * Refactored JeroMQ code to use [ezzmq](https://github.com/daveyarwood/ezzmq).
