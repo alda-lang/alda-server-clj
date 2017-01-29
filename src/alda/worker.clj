@@ -51,19 +51,20 @@
     (reset! current-status :parsing)
     (log/debug "Requiring alda.lisp...")
     (require '[alda.lisp :refer :all])
-    (let* [score (try
-                   (log/debug "Parsing input...")
-                   (parse-input code :events)
-                   (catch Throwable e
-                     {:error e}))
-           ;; if history was nil, make it empty string
-           history (or history "")
-           ;; Parse and remove events
-           history (dissoc (try
-                             (log/debug "Parsing input...")
-                             (parse-input history :map)
-                             (catch Throwable e
-                               {:error e})) :events)]
+    (let [score (try
+                  (log/debug "Parsing body...")
+                  (parse-input code :events)
+                  (catch Throwable e
+                    {:error e}))
+          ;; if history was nil, make it empty string
+          history (or history "")
+          ;; Parse and remove events
+          history (-> (try
+                        (log/debug "Parsing history...")
+                        (parse-input history :map)
+                        (catch Throwable e
+                          {:error e}))
+                      (dissoc :events))]
       (if-let [error (or (:error score) (:error history))]
         (do
           (log/error error error)
