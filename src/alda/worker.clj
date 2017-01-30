@@ -1,6 +1,7 @@
 (ns alda.worker
   (:require [alda.now        :as    now]
             [alda.parser     :refer (parse-input)]
+            [alda.parser-util :refer (parse-to-events-with-context)]
             [alda.lisp.score :refer (continue)]
             [alda.sound      :as    sound :refer (*play-opts*)]
             [alda.sound.midi :as    midi]
@@ -51,11 +52,9 @@
     (reset! current-status :parsing)
     (log/debug "Requiring alda.lisp...")
     (require '[alda.lisp :refer :all])
-    (let [score (try
-                  (log/debug "Parsing body...")
-                  (parse-input code :events)
-                  (catch Throwable e
-                    {:error e}))
+    (let [[context score] (do
+                            (log/debug "Parsing body...")
+                            (parse-to-events-with-context code))
           ;; if history was nil, make it empty string
           history (or history "")
           ;; Parse and remove events
@@ -65,7 +64,7 @@
                         (catch Throwable e
                           {:error e}))
                       (dissoc :events))]
-      (if-let [error (or (:error score) (:error history))]
+      (if-let [error (or (when (= :parse-failure context) score) (:error history))]
         (do
           (log/error error error)
           (reset! current-status :error)
