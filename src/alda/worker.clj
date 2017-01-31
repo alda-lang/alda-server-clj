@@ -2,7 +2,7 @@
   (:require [alda.now        :as    now]
             [alda.parser     :refer (parse-input)]
             [alda.parser-util :refer (parse-to-events-with-context)]
-            [alda.lisp.score :refer (continue)]
+            [alda.lisp.score :refer (continue score)]
             [alda.sound      :as    sound :refer (*play-opts*)]
             [alda.sound.midi :as    midi]
             [alda.util       :as    util]
@@ -52,28 +52,34 @@
     (reset! current-status :parsing)
     (log/debug "Requiring alda.lisp...")
     (require '[alda.lisp :refer :all])
-    (let [[context score] (do
+    (let [[code-context code] (do
                             (log/debug "Parsing body...")
                             (parse-to-events-with-context code))
-          ;; if history was nil, make it empty string
-          history (or history "")
+          ;; If code was whitespace, normalize to ()
+          code (or code ())
           ;; Parse and remove events
-          history (-> (try
-                        (log/debug "Parsing history...")
-                        (parse-input history :map)
-                        (catch Throwable e
-                          {:error e}))
-                      (dissoc :events))]
-      (if-let [error (or (when (= :parse-failure context) score) (:error history))]
+          [history-context history] (do
+                    (log/debug "Parsing history...")
+                    (parse-to-events-with-context history))
+          ;; If history was whitespace, normalize to ()
+          history (or history ())
+          history (if (and history (not (empty? history)) (map? history))
+                    (dissoc history :events)
+                    history)]
+      (if-let [error (or (when (= :parse-failure code-context) code)
+                         (when (= :parse-failure history-context) history))]
         (do
           (log/error error error)
           (reset! current-status :error)
           (reset! current-error error))
         (try
-          (let [score (continue history score)]
+          (let [code (->
+                      (score)
+                      (continue history)
+                      (continue code))]
             (log/debug "Playing score...")
             (reset! current-status :playing)
-            (now/play-score! score {:async? false :one-off? false})
+            (now/play-score! code {:async? false :one-off? false})
             (log/debug "Done playing score.")
             (reset! current-status :available))
           (catch Throwable e
