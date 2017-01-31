@@ -3,7 +3,6 @@
             [alda.parser     :refer (parse-input)]
             [alda.parser-util :refer (parse-to-events-with-context)]
             [alda.lisp.score :refer (continue)]
-            [alda.lisp.model.records   :refer (->AbsoluteOffset)]
             [alda.sound      :as    sound :refer (*play-opts*)]
             [alda.sound.midi :as    midi]
             [alda.util       :as    util]
@@ -64,14 +63,7 @@
                         (parse-input history :map)
                         (catch Throwable e
                           {:error e}))
-                      (dissoc :events))
-          history (assoc history :instruments
-                         (reduce-kv (fn [m k v] (assoc m k
-                                                       (assoc v
-                                                              :current-offset (->AbsoluteOffset 0)
-                                                              :last-offset (->AbsoluteOffset 0))))
-                                    {}
-                                    (:instruments history)))]
+                      (dissoc :events))]
       (if-let [error (or (when (= :parse-failure context) score) (:error history))]
         (do
           (log/error error error)
