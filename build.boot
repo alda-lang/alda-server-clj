@@ -5,7 +5,7 @@
                     [adzerk/bootlaces      "0.1.13" :scope "test"]
                     [adzerk/boot-test      "1.1.2"  :scope "test"]
                     [alda/core             "0.1.2"  :scope "test"]
-                    [alda/sound-engine-clj "0.1.0"  :scope "test"]
+                    [alda/sound-engine-clj "0.1.1"  :scope "test"]
 
                     ; server / worker
                     [com.taoensso/timbre "4.7.4"]

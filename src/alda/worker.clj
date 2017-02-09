@@ -1,6 +1,8 @@
 (ns alda.worker
   (:require [alda.now        :as    now]
             [alda.parser     :refer (parse-input)]
+            [alda.parser-util :refer (parse-to-events-with-context)]
+            [alda.lisp.score :as    score]
             [alda.sound      :as    sound :refer (*play-opts*)]
             [alda.sound.midi :as    midi]
             [alda.util       :as    util]
@@ -45,17 +47,25 @@
 (def current-error (atom nil))
 
 (defn handle-code-play
-  [code]
+  [code history]
   (future
     (reset! current-status :parsing)
     (log/debug "Requiring alda.lisp...")
     (require '[alda.lisp :refer :all])
-    (let [score (try
-                  (log/debug "Parsing input...")
-                  (parse-input code :map)
-                  (catch Throwable e
-                    {:error e}))]
-      (if-let [error (:error score)]
+    (let [_ (log/debug "Parsing body...")
+          [code-context code] (parse-to-events-with-context code)
+
+          ;; If code was whitespace, normalize to ()
+          code (or code ())
+
+          ;; Parse and remove events
+          _ (log/debug "Parsing history...")
+          [history-context history] (parse-to-events-with-context history)
+
+          ;; If history was whitespace, normalize to ()
+          history (or history ())]
+      (if-let [error (or (when (= :parse-failure code-context) code)
+                         (when (= :parse-failure history-context) history))]
         (do
           (log/error error error)
           (reset! current-status :error)
@@ -63,7 +73,9 @@
         (try
           (log/debug "Playing score...")
           (reset! current-status :playing)
-          (now/play-score! score {:async? false :one-off? false})
+          (now/with-score (atom (-> (score/score) (score/continue history)))
+            (now/play-with-opts! {:async? false :one-off? false}
+              code))
           (log/debug "Done playing score.")
           (reset! current-status :available)
           (catch Throwable e
@@ -111,12 +123,12 @@
 
 (defmethod process "play"
   [{:keys [body options]}]
-  (let [{:keys [from to]} options]
+  (let [{:keys [from to history]} options]
     (binding [*play-opts* (assoc *play-opts*
                                  :from     from
                                  :to       to
                                  :one-off? true)]
-      (handle-code-play body))))
+      (handle-code-play body history))))
 
 (defmethod process "play-status"
   [_]
@@ -239,4 +251,3 @@
                                      "BUSY"))
               (reset! last-heartbeat (System/currentTimeMillis))))))))
   (exit! 0))
-
