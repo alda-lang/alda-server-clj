@@ -2,7 +2,7 @@
   (:require [alda.now        :as    now]
             [alda.parser     :refer (parse-input)]
             [alda.parser-util :refer (parse-to-events-with-context)]
-            [alda.lisp.score :refer (continue score)]
+            [alda.lisp.score :as    score]
             [alda.sound      :as    sound :refer (*play-opts*)]
             [alda.sound.midi :as    midi]
             [alda.util       :as    util]
@@ -52,20 +52,18 @@
     (reset! current-status :parsing)
     (log/debug "Requiring alda.lisp...")
     (require '[alda.lisp :refer :all])
-    (let [[code-context code] (do
-                            (log/debug "Parsing body...")
-                            (parse-to-events-with-context code))
+    (let [_ (log/debug "Parsing body...")
+          [code-context code] (parse-to-events-with-context code)
+
           ;; If code was whitespace, normalize to ()
           code (or code ())
+
           ;; Parse and remove events
-          [history-context history] (do
-                    (log/debug "Parsing history...")
-                    (parse-to-events-with-context history))
+          _ (log/debug "Parsing history...")
+          [history-context history] (parse-to-events-with-context history)
+
           ;; If history was whitespace, normalize to ()
-          history (or history ())
-          history (if (and history (not (empty? history)) (map? history))
-                    (dissoc history :events)
-                    history)]
+          history (or history ())]
       (if-let [error (or (when (= :parse-failure code-context) code)
                          (when (= :parse-failure history-context) history))]
         (do
@@ -73,15 +71,13 @@
           (reset! current-status :error)
           (reset! current-error error))
         (try
-          (let [code (->
-                      (score)
-                      (continue history)
-                      (continue code))]
-            (log/debug "Playing score...")
-            (reset! current-status :playing)
-            (now/play-score! code {:async? false :one-off? false})
-            (log/debug "Done playing score.")
-            (reset! current-status :available))
+          (log/debug "Playing score...")
+          (reset! current-status :playing)
+          (now/with-score (atom (-> (score/score) (score/continue history)))
+            (now/play-with-opts! {:async? false :one-off? false}
+              code))
+          (log/debug "Done playing score.")
+          (reset! current-status :available)
           (catch Throwable e
             (log/error e e)
             (reset! current-status :error)
@@ -131,7 +127,6 @@
     (binding [*play-opts* (assoc *play-opts*
                                  :from     from
                                  :to       to
-                                 :history  history
                                  :one-off? true)]
       (handle-code-play body history))))
 
