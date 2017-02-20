@@ -1,5 +1,9 @@
 # CHANGELOG
 
+## 0.1.4 (2017-02-19)
+
+* Fixed a regression introduced in 0.1.3 that was causing the `from` and `to` options not to have an effect.
+
 ## 0.1.3 (2017-02-09)
 
 * Added support for `play` requests that have a `history` field for context.

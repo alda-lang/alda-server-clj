@@ -3,7 +3,7 @@
             [alda.parser     :refer (parse-input)]
             [alda.parser-util :refer (parse-to-events-with-context)]
             [alda.lisp.score :as    score]
-            [alda.sound      :as    sound :refer (*play-opts*)]
+            [alda.sound      :as    sound]
             [alda.sound.midi :as    midi]
             [alda.util       :as    util]
             [alda.version    :refer (-version-)]
@@ -47,7 +47,7 @@
 (def current-error (atom nil))
 
 (defn handle-code-play
-  [code history]
+  [code {:keys [history from to]}]
   (future
     (reset! current-status :parsing)
     (log/debug "Requiring alda.lisp...")
@@ -73,9 +73,14 @@
         (try
           (log/debug "Playing score...")
           (reset! current-status :playing)
-          (now/with-score (atom (-> (score/score) (score/continue history)))
-            (now/play-with-opts! {:async? false :one-off? false}
-              code))
+          (let [play-opts {:from     from
+                           :to       to
+                           :async?   false
+                           :one-off? false}]
+            (if (empty? history)
+              (now/play-score! (score/score code) play-opts)
+              (now/with-score (atom (-> (score/score) (score/continue history)))
+                (now/play-with-opts! play-opts code))))
           (log/debug "Done playing score.")
           (reset! current-status :available)
           (catch Throwable e
@@ -123,12 +128,7 @@
 
 (defmethod process "play"
   [{:keys [body options]}]
-  (let [{:keys [from to history]} options]
-    (binding [*play-opts* (assoc *play-opts*
-                                 :from     from
-                                 :to       to
-                                 :one-off? true)]
-      (handle-code-play body history))))
+  (handle-code-play body options))
 
 (defmethod process "play-status"
   [_]
