@@ -3,8 +3,8 @@
   :dependencies   '[
                     ; dev
                     [adzerk/bootlaces      "0.1.13" :scope "test"]
-                    [adzerk/boot-test      "1.1.2"  :scope "test"]
                     [alda/core             "0.1.2"  :scope "test"]
+                    [adzerk/boot-test      "1.2.0"  :scope "test"]
                     [alda/sound-engine-clj "0.1.2"  :scope "test"]
 
                     ; server / worker
@@ -35,8 +35,7 @@
 
   target  {:dir #{"target"}}
 
-  test    {:namespaces '#{alda.server-test
-                          alda.worker-test}})
+  test    {:include #"-test$"})
 
 (deftask dev
   "Runs the Alda server (default) or worker for development.
