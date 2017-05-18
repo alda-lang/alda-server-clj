@@ -136,13 +136,15 @@
           (is success)
           (testing "that includes the address of the worker playing the score"
             (not (nil? worker-address)))))
+      ;; TIMING: wait briefly to ensure the worker has started working
+      (Thread/sleep 250)
       (testing "the play-status command"
         (let [req (play-status-request worker-address)
               {:keys [success pending body]} (response-for-msg req)]
           (testing "should get a successful response"
             (is success))
           (testing "should say the status is 'parsing' while the worker is parsing"
-            (is (= body "parsing"))
+            (is (= "parsing" body))
             (testing "and 'pending' should be true"
               (is pending))))))
     (testing "the 'stop-server' command"

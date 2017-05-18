@@ -1,5 +1,13 @@
 # CHANGELOG
 
+## 0.1.5 (2017-05-17)
+
+* Include the score map (as a JSON string) in response to `play-status`
+  requests, if the score has been parsed at that point.
+
+  This will enable the upcoming client-side (Java) Alda REPL to determine the
+  current instruments of the score and display them in the REPL prompt.
+
 ## 0.1.4 (2017-02-19)
 
 * Fixed a regression introduced in 0.1.3 that was causing the `from` and `to` options not to have an effect.

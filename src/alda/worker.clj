@@ -44,11 +44,13 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (def current-status (atom :available))
-(def current-error (atom nil))
+(def current-score  (atom nil))
+(def current-error  (atom nil))
 
 (defn handle-code-play
   [code {:keys [history from to]}]
   (future
+    (reset! current-score nil)
     (reset! current-status :parsing)
     (log/debug "Requiring alda.lisp...")
     (require '[alda.lisp :refer :all])
@@ -75,12 +77,16 @@
           (reset! current-status :playing)
           (let [play-opts {:from     from
                            :to       to
-                           :async?   false
-                           :one-off? false}]
-            (if (empty? history)
-              (now/play-score! (score/score code) play-opts)
-              (now/with-score (atom (-> (score/score) (score/continue history)))
-                (now/play-with-opts! play-opts code))))
+                           :async?   true
+                           :one-off? false}
+                {:keys [score wait]}
+                (if (empty? history)
+                  (now/play-score! (score/score code) play-opts)
+                  (now/with-score* (atom (-> (score/score)
+                                             (score/continue history)))
+                    (now/play-with-opts! play-opts code)))]
+            (reset! current-score score)
+            (wait))
           (log/debug "Done playing score.")
           (reset! current-status :available)
           (catch Throwable e
@@ -138,6 +144,7 @@
       (reset! current-error nil)
       (error-response error))
     (-> (success-response (name @current-status))
+        (assoc :score @current-score)
         (assoc :pending (not (#{:available :playing} @current-status))))))
 
 (defmethod process "version"

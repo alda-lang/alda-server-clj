@@ -6,8 +6,8 @@
             [alda.zmq-util :refer (find-open-port)]
             [alda.version  :refer (-version-)]))
 
-(def ^:dynamic *port*        nil)
-(def ^:dynamic *socket*      nil)
+(def ^:dynamic *port*   nil)
+(def ^:dynamic *socket* nil)
 
 (defn- init!
   [var val]

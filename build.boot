@@ -1,22 +1,24 @@
 (set-env!
-  :source-paths   #{"src" "test"}
-  :dependencies   '[
-                    ; dev
-                    [adzerk/bootlaces      "0.1.13" :scope "test"]
-                    [alda/core             "0.1.2"  :scope "test"]
-                    [adzerk/boot-test      "1.2.0"  :scope "test"]
-                    [alda/sound-engine-clj "0.1.2"  :scope "test"]
+  :source-paths #{"src" "test"}
+  :dependencies
+  '[
+    ; dev
+    [adzerk/bootlaces      "0.1.13" :scope "test"]
+    [alda/core             "0.1.2"  :scope "test"]
+    [adzerk/boot-test      "1.2.0"  :scope "test"]
+    [alda/sound-engine-clj "0.2.0"  :scope "test"]
 
-                    ; server / worker
-                    [com.taoensso/timbre "4.7.4"]
-                    [cheshire            "5.6.3"]
-                    [io.djy/ezzmq        "0.5.1"]
-                    [me.raynes/conch     "0.8.0"]])
+    ; server / worker
+    [com.taoensso/timbre "4.10.0" :exclusions [org.clojure/clojure]]
+    [cheshire            "5.7.1"]
+    [io.djy/ezzmq        "0.5.1"]
+    [me.raynes/conch     "0.8.0"]
+   ])
 
 (require '[adzerk.bootlaces :refer :all]
          '[adzerk.boot-test :refer :all])
 
-(def ^:const +version+ "0.1.4")
+(def ^:const +version+ "0.1.5")
 
 (bootlaces! +version+)
 
