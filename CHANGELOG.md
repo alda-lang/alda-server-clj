@@ -1,5 +1,23 @@
 # CHANGELOG
 
+## 0.1.6 (2017-05-18)
+
+* Improved the reliability of including the score map in `play-status` responses.
+
+  Prior to this version, we were storing the state of a worker in three separate
+  (isolated) atoms: `current-status`, `current-score`, and `current-error`.
+  Because we were storing state this way, it was possible for one state to be
+  updated independently of another, when we actually wanted to update them at
+  the same time as part of a transaction. For example, the status could be
+  updated to "playing," and then the worker could answer a request for status
+  before it updated the score to the score it responds with, so the status and
+  score could be out of sync.
+
+  Clojure provides the `ref` type to solve problems like this; they allow you to
+  update multiple values transactionally. As of this version, we are using refs
+  instead of atoms, which should make the `play-status` responses more
+  consistent.
+
 ## 0.1.5 (2017-05-17)
 
 * Include the score map (as a JSON string) in response to `play-status`
