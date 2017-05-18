@@ -43,13 +43,21 @@
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(def current-status (atom :available))
-(def current-error (atom nil))
+(def current-status (ref :available))
+(def current-score  (ref nil))
+(def current-error  (ref nil))
+
+(defn update-state!
+  [status score error]
+  (dosync
+    (ref-set current-status status)
+    (ref-set current-score score)
+    (ref-set current-error error)))
 
 (defn handle-code-play
   [code {:keys [history from to]}]
   (future
-    (reset! current-status :parsing)
+    (update-state! :parsing nil nil)
     (log/debug "Requiring alda.lisp...")
     (require '[alda.lisp :refer :all])
     (let [_ (log/debug "Parsing body...")
@@ -68,25 +76,28 @@
                          (when (= :parse-failure history-context) history))]
         (do
           (log/error error error)
-          (reset! current-status :error)
-          (reset! current-error error))
+          (update-state! :error nil error))
         (try
           (log/debug "Playing score...")
-          (reset! current-status :playing)
           (let [play-opts {:from     from
                            :to       to
-                           :async?   false
-                           :one-off? false}]
-            (if (empty? history)
-              (now/play-score! (score/score code) play-opts)
-              (now/with-score (atom (-> (score/score) (score/continue history)))
-                (now/play-with-opts! play-opts code))))
+                           :async?   true
+                           :one-off? false}
+                {:keys [score wait]}
+                (if (empty? history)
+                  (now/play-score! (score/score code) play-opts)
+                  (now/with-score* (atom (-> (score/score)
+                                             (score/continue history)))
+                    (now/play-with-opts! play-opts code)))]
+            (update-state! :playing score nil)
+            (wait))
           (log/debug "Done playing score.")
-          (reset! current-status :available)
+          ;; become available, but hang onto the most recent score or error
+          ;; until asked to start playing a new score
+          (dosync (ref-set current-status :available))
           (catch Throwable e
             (log/error e e)
-            (reset! current-status :error)
-            (reset! current-error e))))))
+            (update-state! :error nil e))))))
   (success-response "Request received."))
 
 (defn handle-code-parse
@@ -132,13 +143,16 @@
 
 (defmethod process "play-status"
   [_]
-  (if (= :error @current-status)
-    (let [error @current-error]
-      (reset! current-status :available)
-      (reset! current-error nil)
-      (error-response error))
-    (-> (success-response (name @current-status))
-        (assoc :pending (not (#{:available :playing} @current-status))))))
+  (let [status @current-status
+        score  @current-score
+        error  @current-error]
+    (if (= :error status)
+      (do
+        (update-state! :available nil nil)
+        (error-response error))
+      (-> (success-response (name status))
+          (assoc :score score)
+          (assoc :pending (not (#{:available :playing} status)))))))
 
 (defmethod process "version"
   [_]
