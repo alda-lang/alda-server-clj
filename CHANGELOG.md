@@ -1,5 +1,16 @@
 # CHANGELOG
 
+## 0.1.7 (2017-05-19)
+
+* Each worker process now has a lifespan of 15-20 minutes. Once its lifespan is
+  up, it finishes doing whatever work it might be doing and then shuts down so
+  that the server can replace it with a fresh worker.
+
+  This ensures that available workers are always fresh (spawned within the last
+  20 minutes), which helps us avoid audio errors like delayed MIDI audio.
+
+  Fixes issue [#5](https://github.com/alda-lang/alda-server-clj/issues/5).
+
 ## 0.1.6 (2017-05-18)
 
 * Improved the reliability of including the score map in `play-status` responses.

@@ -160,8 +160,10 @@
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(def ^:const HEARTBEAT-INTERVAL 1000)
-(def ^:const SUSPENDED-INTERVAL 10000)
+(def ^:const MIN-LIFESPAN       (* 1000 60 15)) ; 15 minutes
+(def ^:const MAX-LIFESPAN       (* 1000 60 20)) ; 20 minutes
+(def ^:const HEARTBEAT-INTERVAL 1000)  ; 1 second
+(def ^:const SUSPENDED-INTERVAL 10000) ; 10 seconds
 (def ^:const MAX-LIVES          10)
 
 (def lives (atom MAX-LIVES))
@@ -179,7 +181,9 @@
   (log/infof "Connecting to socket on port %d..." port)
   (zmq/with-new-context
     (let [running?       (atom true)
-          last-heartbeat (atom (System/currentTimeMillis))
+          now            (System/currentTimeMillis)
+          lifespan       (+ now (rand-nth (range MIN-LIFESPAN MAX-LIFESPAN)))
+          last-heartbeat (atom now)
           socket         (zmq/socket :dealer {:connect (str "tcp://*:" port)})]
 
       (zmq/after-shutdown
@@ -234,21 +238,36 @@
            (log/errorf "Invalid message: %s" (mapv #(String. %) msg))))]
 
         (while (and (zmq/polling?) @running?)
-          (let [got-msgs (zmq/poll HEARTBEAT-INTERVAL)]
+          (let [now      (System/currentTimeMillis)
+                got-msgs (zmq/poll HEARTBEAT-INTERVAL)]
             (cond
-              ; detect when the system has been suspended and stop working so
-              ; the server can replace it with a fresh worker (this fixes a bug
-              ; where MIDI audio is delayed)
-              (> (System/currentTimeMillis)
-                 (+ @last-heartbeat SUSPENDED-INTERVAL))
+              ;; Each worker has a randomly assigned lifespan in the range of
+              ;; MIN-LIFESPAN and MAX-LIFESPAN. Once this period of time has
+              ;; elapsed, the worker finishes whatever work it might be doing
+              ;; and then shuts down so that the server can replace it with a
+              ;; fresh worker.
+              ;;
+              ;; This ensures that the workers available are always recently
+              ;; spawned processes, which helps us avoid known audio bugs.
+              (and (> now lifespan) (= :available @current-status))
               (do
-                (log/info "Process suspension detected. Shutting down...")
-                (reset! last-heartbeat (System/currentTimeMillis))
+                (log/info "Worker lifespan elapsed. Shutting down...")
+                (reset! last-heartbeat now)
                 (reset! running? false))
 
-              ; if a heartbeat wasn't received from the server within the
-              ; acceptable threshold, MAX-LIVES times in a row, conclude that
-              ; the server has stopped sending heartbeats and shut down
+              ;; Detect when the system has been suspended and stop working so
+              ;; the server can replace it with a fresh worker.
+              ;;
+              ;; This fixes a bug where MIDI audio is delayed.
+              (> now (+ @last-heartbeat SUSPENDED-INTERVAL))
+              (do
+                (log/info "Process suspension detected. Shutting down...")
+                (reset! last-heartbeat now)
+                (reset! running? false))
+
+              ;; If a heartbeat wasn't received from the server within the
+              ;; acceptable threshold, MAX-LIVES times in a row, conclude that
+              ;; the server has stopped sending heartbeats and shut down.
               (not (contains? got-msgs 0))
               (do
                 (swap! lives dec)
@@ -256,12 +275,11 @@
                   (log/error "Unable to reach the server.")
                   (reset! running? false))))
 
-            ; send AVAILABLE/BUSY status back to the server
+            ;; Send AVAILABLE/BUSY status back to the server.
             (when (and @running?
-                       (> (System/currentTimeMillis)
-                          (+ @last-heartbeat HEARTBEAT-INTERVAL)))
+                       (> now (+ @last-heartbeat HEARTBEAT-INTERVAL)))
               (zmq/send-msg socket (if (= :available @current-status)
                                      "AVAILABLE"
                                      "BUSY"))
-              (reset! last-heartbeat (System/currentTimeMillis))))))))
+              (reset! last-heartbeat now)))))))
   (exit! 0))
