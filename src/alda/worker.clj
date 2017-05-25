@@ -1,16 +1,17 @@
 (ns alda.worker
-  (:require [alda.now        :as    now]
-            [alda.parser     :refer (parse-input)]
-            [alda.parser-util :refer (parse-to-events-with-context)]
-            [alda.lisp.score :as    score]
-            [alda.sound      :as    sound]
-            [alda.sound.midi :as    midi]
-            [alda.util       :as    util]
-            [alda.version    :refer (-version-)]
-            [cheshire.core   :as    json]
-            [clojure.pprint  :refer (pprint)]
-            [taoensso.timbre :as    log]
-            [ezzmq.core      :as    zmq]))
+  (:require [alda.now           :as    now]
+            [alda.parser        :refer (parse-input)]
+            [alda.parser-util   :refer (parse-to-events-with-context)]
+            [alda.lisp.score    :as    score]
+            [alda.sound         :as    sound]
+            [alda.sound.midi    :as    midi]
+            [alda.util          :as    util]
+            [alda.version       :refer (-version-)]
+            [cheshire.core      :as    json]
+            [clojure.core.cache :as    cache]
+            [clojure.pprint     :refer (pprint)]
+            [taoensso.timbre    :as    log]
+            [ezzmq.core         :as    zmq]))
 
 (def ^:dynamic *no-system-exit* false)
 
@@ -23,6 +24,12 @@
 (defn start-alda-environment!
   []
   (sound/start-synthesis-engine!)
+  (midi/open-midi-synth!)
+  (log/debug "Requiring alda.lisp...")
+  (require '[alda.lisp :refer :all]))
+
+(defn refresh-alda-environment!
+  []
   (midi/open-midi-synth!))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -43,23 +50,47 @@
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(def current-status (ref :available))
-(def current-score  (ref nil))
-(def current-error  (ref nil))
+(def ^:const JOB_CACHE_SIZE 20)
 
-(defn update-state!
-  [status score error]
-  (dosync
-    (ref-set current-status status)
-    (ref-set current-score score)
-    (ref-set current-error error)))
+(defrecord Job [status score error])
 
-(defn handle-code-play
-  [code {:keys [history from to]}]
-  (future
-    (update-state! :parsing nil nil)
-    (log/debug "Requiring alda.lisp...")
-    (require '[alda.lisp :refer :all])
+(def job-cache (atom (cache/fifo-cache-factory {} :threshold JOB_CACHE_SIZE)))
+
+(defn update-job! [id job]
+  "Upserts a Job record into the cache.
+   If a job with that ID is already in the cache, updates it.
+   Otherwise, adds it to the cache."
+  (swap! job-cache (fn [c]
+                     (if (cache/has? c id)
+                       (-> (cache/hit c id)
+                           (assoc id job))
+                       (cache/miss c id job)))))
+
+(defn update-job-status! [id status]
+  "Updates the `status` of a job, preserving the existing values of `score` and
+   `error`.
+
+   If the job doesn't exist yet, adds a new job with the provided `id` and
+   `status`."
+  (swap! job-cache (fn [c]
+                     (if (cache/has? c id)
+                       (-> (cache/hit c id)
+                           (update id assoc :status status))
+                       (cache/miss c id (Job. status nil nil))))))
+
+(defn pending?
+  [{:keys [status] :as job}]
+  (not (#{:success :error :playing} status)))
+
+(defn available?
+  []
+  (not-any? #(#{:parsing :playing} (:status %)) (vals @job-cache)))
+
+(defn run-job!
+  [code {:keys [history from to jobId]}]
+  (try
+    (log/debugf "Starting job %s..." jobId)
+    (update-job! jobId (Job. :parsing nil nil))
     (let [_ (log/debug "Parsing body...")
           [code-context code] (parse-to-events-with-context code)
 
@@ -68,37 +99,54 @@
 
           ;; Parse and remove events
           _ (log/debug "Parsing history...")
-          [history-context history] (parse-to-events-with-context history)
+          [history-context history] (parse-to-events-with-context
+                                      history)
 
           ;; If history was whitespace, normalize to ()
           history (or history ())]
-      (if-let [error (or (when (= :parse-failure code-context) code)
-                         (when (= :parse-failure history-context) history))]
+      (if-let [error (or (when (= :parse-failure code-context)
+                           code)
+                         (when (= :parse-failure history-context)
+                           history))]
         (do
           (log/error error error)
-          (update-state! :error nil error))
-        (try
+          (update-job! jobId (Job. :error nil error)))
+        (do
           (log/debug "Playing score...")
           (let [play-opts {:from     from
                            :to       to
                            :async?   true
-                           :one-off? false}
+                           :one-off? true}
                 {:keys [score wait]}
                 (if (empty? history)
                   (now/play-score! (score/score code) play-opts)
-                  (now/with-score* (atom (-> (score/score)
-                                             (score/continue history)))
+                  (now/with-score* (atom
+                                     (-> (score/score)
+                                         (score/continue history)))
                     (now/play-with-opts! play-opts code)))]
-            (update-state! :playing score nil)
-            (wait))
+            (update-job! jobId (Job. :playing score nil))
+            (wait)
+            (refresh-alda-environment!))
           (log/debug "Done playing score.")
-          ;; become available, but hang onto the most recent score or error
-          ;; until asked to start playing a new score
-          (dosync (ref-set current-status :available))
-          (catch Throwable e
-            (log/error e e)
-            (update-state! :error nil e))))))
-  (success-response "Request received."))
+          (update-job-status! jobId :success))))
+    (catch Throwable e
+      (log/error e e)
+      (update-job! jobId (Job. :error nil e)))))
+
+(defn handle-code-play
+  [code {:keys [jobId] :as options}]
+  (-> (cond
+        (empty? jobId)
+        (error-response "Request missing a `jobId` option.")
+
+        (get @job-cache jobId)
+        (success-response "Already playing that score.")
+
+        :else
+        (do
+          (future (run-job! code options))
+          (success-response "Request received.")))
+      (assoc :jobId jobId)))
 
 (defn handle-code-parse
   [code & {:keys [mode] :or {mode :lisp}}]
@@ -142,17 +190,24 @@
   (handle-code-play body options))
 
 (defmethod process "play-status"
-  [_]
-  (let [status @current-status
-        score  @current-score
-        error  @current-error]
-    (if (= :error status)
-      (do
-        (update-state! :available nil nil)
-        (error-response error))
-      (-> (success-response (name status))
-          (assoc :score score)
-          (assoc :pending (not (#{:available :playing} status)))))))
+  [{:keys [options]}]
+  (let [job-id (get options :jobId)
+        {:keys [status score error] :as job} (get @job-cache job-id)]
+    (-> (cond
+          (empty? job-id)
+          (error-response "Request missing a `jobId` option.")
+
+          (nil? status)
+          (error-response "Job not found.")
+
+          (= :error status)
+          (error-response error)
+
+          :else
+          (-> (success-response (name status))
+              (assoc :score score)
+              (assoc :pending (pending? job))))
+        (assoc :jobId job-id))))
 
 (defmethod process "version"
   [_]
@@ -217,22 +272,23 @@
            (let [[return-address body command] msg
                  body    (String. body)
                  command (String. command)]
-             (if (and (not= :available @current-status)
-                      (not= "play-status" command))
-               (log/debug "Ignoring message. I'm busy.")
-               (try
-                 (log/debug "Processing message...")
-                 (let [req (json/parse-string body true)
-                       res (json/generate-string (process req))]
-                   (log/debug "Sending response...")
-                   (zmq/send-msg socket [return-address "" res])
-                   (log/debug "Response sent."))
-                 (catch Throwable e
-                   (log/error e e)
-                   (log/info "Sending error response...")
-                   (let [err (json/generate-string (error-response e))]
-                     (zmq/send-msg socket [return-address "" err]))
-                   (log/info "Error response sent.")))))
+             (try
+               (when (and (not (available?))
+                          (not= "play-status" command))
+                 (log/debugf "Rejecting message (command: %s). I'm busy." command)
+                 (throw (Exception. "The requested worker is not available.")))
+               (log/debugf "Processing message... (command: %s)" command)
+               (let [req (json/parse-string body true)
+                     res (json/generate-string (process req))]
+                 (log/debug "Sending response...")
+                 (zmq/send-msg socket [return-address "" res])
+                 (log/debug "Response sent."))
+               (catch Throwable e
+                 (log/error e e)
+                 (log/info "Sending error response...")
+                 (let [err (json/generate-string (error-response e))]
+                   (zmq/send-msg socket [return-address "" err]))
+                 (log/info "Error response sent."))))
 
            :else
            (log/errorf "Invalid message: %s" (mapv #(String. %) msg))))]
@@ -249,7 +305,7 @@
               ;;
               ;; This ensures that the workers available are always recently
               ;; spawned processes, which helps us avoid known audio bugs.
-              (and (> now lifespan) (= :available @current-status))
+              (and (> now lifespan) (available?))
               (do
                 (log/info "Worker lifespan elapsed. Shutting down...")
                 (reset! last-heartbeat now)
@@ -271,15 +327,13 @@
               (not (contains? got-msgs 0))
               (do
                 (swap! lives dec)
-                (when (and (<= @lives 0) (= :available @current-status))
+                (when (and (<= @lives 0) (available?))
                   (log/error "Unable to reach the server.")
                   (reset! running? false))))
 
             ;; Send AVAILABLE/BUSY status back to the server.
             (when (and @running?
                        (> now (+ @last-heartbeat HEARTBEAT-INTERVAL)))
-              (zmq/send-msg socket (if (= :available @current-status)
-                                     "AVAILABLE"
-                                     "BUSY"))
+              (zmq/send-msg socket (if (available?) "AVAILABLE" "BUSY"))
               (reset! last-heartbeat now)))))))
   (exit! 0))

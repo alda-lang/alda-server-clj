@@ -9,16 +9,17 @@
     [alda/sound-engine-clj "0.2.0"  :scope "test"]
 
     ; server / worker
-    [com.taoensso/timbre "4.10.0" :exclusions [org.clojure/clojure]]
-    [cheshire            "5.7.1"]
-    [io.djy/ezzmq        "0.5.1"]
-    [me.raynes/conch     "0.8.0"]
+    [com.taoensso/timbre    "4.10.0" :exclusions [org.clojure/clojure]]
+    [cheshire               "5.7.1"]
+    [io.djy/ezzmq           "0.5.3"]
+    [me.raynes/conch        "0.8.0"]
+    [org.clojure/core.cache "0.6.5"]
    ])
 
 (require '[adzerk.bootlaces :refer :all]
          '[adzerk.boot-test :refer :all])
 
-(def ^:const +version+ "0.1.7")
+(def ^:const +version+ "0.2.0")
 
 (bootlaces! +version+)
 
