@@ -72,8 +72,7 @@
     (testing "should successfully respond to"
       (testing "a 'parse' command"
         (let [req {:command "parse"
-                   :body "piano: c8 d e f g2"
-                   :options {:as "lisp"}}
+                   :body "piano: c8 d e f g2"}
               [_ _ json :as res] (response-for req)
               {:keys [success body]} (json/parse-string json true)]
           (is success)))

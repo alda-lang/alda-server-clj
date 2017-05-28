@@ -1,7 +1,6 @@
 (ns alda.worker
   (:require [alda.now           :as    now]
             [alda.parser        :refer (parse-input)]
-            [alda.parser-util   :refer (parse-to-events-with-context)]
             [alda.lisp.score    :as    score]
             [alda.sound         :as    sound]
             [alda.sound.midi    :as    midi]
@@ -91,44 +90,25 @@
   (try
     (log/debugf "Starting job %s..." jobId)
     (update-job! jobId (Job. :parsing nil nil))
-    (let [_ (log/debug "Parsing body...")
-          [code-context code] (parse-to-events-with-context code)
-
-          ;; If code was whitespace, normalize to ()
-          code (or code ())
-
-          ;; Parse and remove events
-          _ (log/debug "Parsing history...")
-          [history-context history] (parse-to-events-with-context
-                                      history)
-
-          ;; If history was whitespace, normalize to ()
-          history (or history ())]
-      (if-let [error (or (when (= :parse-failure code-context)
-                           code)
-                         (when (= :parse-failure history-context)
-                           history))]
-        (do
-          (log/error error error)
-          (update-job! jobId (Job. :error nil error)))
-        (do
-          (log/debug "Playing score...")
-          (let [play-opts {:from     from
-                           :to       to
-                           :async?   true
-                           :one-off? true}
-                {:keys [score wait]}
-                (if (empty? history)
-                  (now/play-score! (score/score code) play-opts)
-                  (now/with-score* (atom
-                                     (-> (score/score)
-                                         (score/continue history)))
-                    (now/play-with-opts! play-opts code)))]
-            (update-job! jobId (Job. :playing score nil))
-            (wait)
-            (refresh-alda-environment!))
-          (log/debug "Done playing score.")
-          (update-job-status! jobId :success))))
+    (let [_       (log/debug "Parsing body...")
+          events  (parse-input code :output :events-or-error)
+          _       (log/debug "Parsing history...")
+          history (when history (parse-input history))]
+      (log/debug "Playing score...")
+      (let [play-opts {:from     from
+                       :to       to
+                       :async?   true
+                       :one-off? true}
+            {:keys [score wait]}
+            (if (empty? history)
+              (now/play-score! (score/score events) play-opts)
+              (now/with-score* (atom history)
+                (now/play-with-opts! play-opts events)))]
+        (update-job! jobId (Job. :playing score nil))
+        (wait)
+        (refresh-alda-environment!))
+      (log/debug "Done playing score.")
+      (update-job-status! jobId :success))
     (catch Throwable e
       (log/error e e)
       (update-job! jobId (Job. :error nil e)))))
@@ -149,13 +129,10 @@
       (assoc :jobId jobId)))
 
 (defn handle-code-parse
-  [code & {:keys [mode] :or {mode :lisp}}]
+  [code]
   (try
     (require '[alda.lisp :refer :all])
-    (success-response (case mode
-                        :lisp (let [result (parse-input code mode)]
-                                (with-out-str (pprint result)))
-                        :map  (parse-input code mode)))
+    (success-response (parse-input code))
     (catch Throwable e
       (log/error e e)
       (error-response e))))
@@ -174,12 +151,7 @@
 
 (defmethod process "parse"
   [{:keys [body options]}]
-  (let [{:keys [as]} options]
-    (case as
-      "lisp" (handle-code-parse body :mode :lisp)
-      "map"  (handle-code-parse body :mode :map)
-      nil    (error-response "Missing option: as")
-      (error-response (format "Invalid format: %s" as)))))
+  (handle-code-parse body))
 
 (defmethod process "ping"
   [_]
@@ -205,7 +177,16 @@
 
           :else
           (-> (success-response (name status))
-              (assoc :score score)
+              ;; HACK: Clojure functions are not serializable as JSON, so we're
+              ;; just leaving them out of the returned score for now
+              (assoc :score
+                     (-> score
+                         (update :events
+                                 #(remove (fn [event]
+                                            (instance?
+                                              alda.lisp.model.records.Function
+                                              event))
+                                          %))))
               (assoc :pending (pending? job))))
         (assoc :jobId job-id))))
 

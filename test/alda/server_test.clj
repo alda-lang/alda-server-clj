@@ -111,21 +111,13 @@
     (wait-for-a-worker)
     (println "Worker ready.")
     (testing "the 'parse' command"
-      (testing "with the :as 'lisp' option"
-        (let [req {:command "parse" :body "piano: c" :options {:as "lisp"}}
-              {:keys [success body]} (response-for req)]
-          (testing "should get a successful response containing parsed code"
-            (is success)
-            (is (= body "(alda.lisp/score\n (alda.lisp/part\n  {:names [\"piano\"]}\n  (alda.lisp/note (alda.lisp/pitch :c))))\n")))))
-      (wait-for-a-worker)
-      (testing "with the :as 'map' option"
-        (let [req {:command "parse" :body "piano: c" :options {:as "map"}}
-              {:keys [success body]} (response-for req)]
-          (testing "should get a successful response containing a score map"
-            (is success)
-            (let [score-map (json/parse-string body true)]
-              (is (contains? score-map :events))
-              (is (contains? score-map :instruments)))))))
+      (let [req {:command "parse" :body "piano: c"}
+            {:keys [success body]} (response-for req)]
+        (testing "should get a successful response containing a score map"
+          (is success)
+          (let [score-map (json/parse-string body true)]
+            (is (contains? score-map :events))
+            (is (contains? score-map :instruments))))))
     (wait-for-a-worker)
     ; forcing parsing to take at least 2 seconds for play-status test below
     (let [req {:command "play" :body "piano: (Thread/sleep 2000) (vol 0) c2"}
