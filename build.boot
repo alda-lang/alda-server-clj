@@ -4,7 +4,7 @@
   '[
     ; dev
     [adzerk/bootlaces      "0.1.13" :scope "test"]
-    [alda/core             "0.1.2"  :scope "test"]
+    [alda/core             "0.2.0"  :scope "test"]
     [adzerk/boot-test      "1.2.0"  :scope "test"]
     [alda/sound-engine-clj "0.2.0"  :scope "test"]
 
@@ -19,7 +19,7 @@
 (require '[adzerk.bootlaces :refer :all]
          '[adzerk.boot-test :refer :all])
 
-(def ^:const +version+ "0.2.0")
+(def ^:const +version+ "0.3.0")
 
 (bootlaces! +version+)
 

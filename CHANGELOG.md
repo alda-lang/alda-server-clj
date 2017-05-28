@@ -1,5 +1,19 @@
 # CHANGELOG
 
+## 0.3.0 (2017-05-27)
+
+* Updates for compatibility with alda/core 0.2.0, which has a brand new parser
+  rewritten from the ground up.
+
+  One thing about the new parser is that it doesn't generate alda.lisp code
+  anymore, so that feature has been removed from the worker.
+
+* Bugfix: scores that included scheduled Clojure function calls were breaking
+  JSON serialization. In the long term, I need to think about how these can be
+  serialized, but in the short term, we don't really need them in the score
+  JSON, so as a hack, we just aren't including them in the score the server
+  returns.
+
 ## 0.2.0 (2017-05-25)
 
 * Updated ezzmq dependency to 0.5.3. This updates the transitive JeroMQ
