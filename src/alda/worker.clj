@@ -177,7 +177,16 @@
 
           :else
           (-> (success-response (name status))
-              (assoc :score score)
+              ;; HACK: Clojure functions are not serializable as JSON, so we're
+              ;; just leaving them out of the returned score for now
+              (assoc :score
+                     (-> score
+                         (update :events
+                                 #(remove (fn [event]
+                                            (instance?
+                                              alda.lisp.model.records.Function
+                                              event))
+                                          %))))
               (assoc :pending (pending? job))))
         (assoc :jobId job-id))))
 
