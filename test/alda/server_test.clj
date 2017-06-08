@@ -22,9 +22,14 @@
     (binding [server/*no-system-exit* true]
       (server/start-server! 2 *frontend-port*))))
 
+(defn- generate-job-id
+  []
+  (letfn [(rand-char [] (char (rand-nth (range (int \a) (inc (int \z))))))]
+    (apply str (repeatedly 20 rand-char))))
+
 (defn play-status-request
-  [worker-address]
-  [(json/generate-string {:command "play-status"})
+  [worker-address job-id]
+  [(json/generate-string {:command "play-status" :options {:jobId job-id}})
    worker-address
    "play-status"])
 
@@ -120,21 +125,28 @@
             (is (contains? score-map :instruments))))))
     (wait-for-a-worker)
     ; forcing parsing to take at least 2 seconds for play-status test below
-    (let [req {:command "play" :body "piano: (Thread/sleep 2000) (vol 0) c2"}
+    (let [job-id (generate-job-id)
+          req {:command "play"
+               :body    "piano: (Thread/sleep 2000) (vol 0) c2"
+               :options {:jobId job-id}}
           [_ json worker-address] (complete-response-for req)
-          {:keys [success body]}  (json/parse-string (String. json) true)]
+          {:keys [success body jobId]} (json/parse-string (String. json) true)]
       (testing "the play command"
         (testing "should get a successful response"
           (is success)
           (testing "that includes the address of the worker playing the score"
-            (not (nil? worker-address)))))
+            (is (not (nil? worker-address))))
+          (testing "that includes the correct job ID"
+            (is (= job-id jobId)))))
       ;; TIMING: wait briefly to ensure the worker has started working
       (Thread/sleep 250)
       (testing "the play-status command"
-        (let [req (play-status-request worker-address)
-              {:keys [success pending body]} (response-for-msg req)]
+        (let [req (play-status-request worker-address job-id)
+              {:keys [success pending body jobId]} (response-for-msg req)]
           (testing "should get a successful response"
-            (is success))
+            (is success)
+            (testing "that includes the correct job ID"
+              (is (= job-id jobId))))
           (testing "should say the status is 'parsing' while the worker is parsing"
             (is (= "parsing" body))
             (testing "and 'pending' should be true"

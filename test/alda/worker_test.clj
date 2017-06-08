@@ -13,6 +13,11 @@
   [var val]
   (alter-var-root var (constantly val)))
 
+(defn- generate-job-id
+  []
+  (letfn [(rand-char [] (char (rand-nth (range (int \a) (inc (int \z))))))]
+    (apply str (repeatedly 20 rand-char))))
+
 (defn response-for-msg
   [msg]
   (zmq/send-msg *socket* msg)
@@ -68,7 +73,7 @@
       (dotimes [_ 5]
         (let [[msg] (zmq/receive-msg *socket* :stringify true)]
           (is (= "AVAILABLE" msg)))))
-    ; NOTE: the expected responses are tested in alda.server-test
+    ;; NOTE: the expected responses are tested in alda.server-test
     (testing "should successfully respond to"
       (testing "a 'parse' command"
         (let [req {:command "parse"
@@ -76,16 +81,21 @@
               [_ _ json :as res] (response-for req)
               {:keys [success body]} (json/parse-string json true)]
           (is success)))
-      (testing "a 'play' command"
-        (let [req {:command "play" :body "piano: (vol 0) c2"}
-              [_ _ json] (response-for req)
-              {:keys [success body]} (json/parse-string json true)]
-          (is success)))
-      (testing "a 'play-status' command"
-        (let [req {:command "play-status"}
-              [_ _ json] (response-for req)
-              {:keys [success body] :as res} (json/parse-string json true)]
-          (is success))))
+      (let [job-id (generate-job-id)]
+        (testing "a 'play' command"
+          (let [req {:command "play"
+                     :body "piano: (vol 0) c2"
+                     :options {:jobId job-id}}
+                [_ _ json] (response-for req)
+                {:keys [success body]} (json/parse-string json true)]
+            (is success)))
+        ;; TIMING: give the worker time to start processing the job
+        (Thread/sleep 1000)
+        (testing "a 'play-status' command"
+          (let [req {:command "play-status" :options {:jobId job-id}}
+                [_ _ json] (response-for req)
+                {:keys [success body] :as res} (json/parse-string json true)]
+            (is success)))))
     (testing "should accept signals from the server"
       (doseq [signal ["HEARTBEAT" "KILL"]]
         (zmq/send-msg *socket* signal)))))
