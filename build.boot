@@ -4,7 +4,7 @@
   '[
     ; dev
     [adzerk/bootlaces      "0.1.13" :scope "test"]
-    [alda/core             "0.2.0"  :scope "test"]
+    [alda/core             "0.2.2"  :scope "test"]
     [adzerk/boot-test      "1.2.0"  :scope "test"]
     [alda/sound-engine-clj "0.2.0"  :scope "test"]
 

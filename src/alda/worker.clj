@@ -51,7 +51,7 @@
 
 (def ^:const JOB_CACHE_SIZE 20)
 
-(defrecord Job [status score error])
+(defrecord Job [status score error stop!])
 
 (def job-cache (atom (cache/fifo-cache-factory {} :threshold JOB_CACHE_SIZE)))
 
@@ -75,7 +75,7 @@
                      (if (cache/has? c id)
                        (-> (cache/hit c id)
                            (update id assoc :status status))
-                       (cache/miss c id (Job. status nil nil))))))
+                       (cache/miss c id (Job. status nil nil nil))))))
 
 (defn pending?
   [{:keys [status] :as job}]
@@ -89,7 +89,7 @@
   [code {:keys [history from to jobId]}]
   (try
     (log/debugf "Starting job %s..." jobId)
-    (update-job! jobId (Job. :parsing nil nil))
+    (update-job! jobId (Job. :parsing nil nil nil))
     (let [_       (log/debug "Parsing body...")
           events  (parse-input code :output :events-or-error)
           _       (log/debug "Parsing history...")
@@ -99,19 +99,29 @@
                        :to       to
                        :async?   true
                        :one-off? true}
-            {:keys [score wait]}
+            {:keys [score stop! wait]}
             (if (empty? history)
               (now/play-score! (score/score events) play-opts)
               (now/with-score* (atom history)
                 (now/play-with-opts! play-opts events)))]
-        (update-job! jobId (Job. :playing score nil))
+        (update-job! jobId (Job. :playing score nil stop!))
         (wait)
         (refresh-alda-environment!))
       (log/debug "Done playing score.")
       (update-job-status! jobId :success))
     (catch Throwable e
       (log/error e e)
-      (update-job! jobId (Job. :error nil e)))))
+      (update-job! jobId (Job. :error nil e nil)))))
+
+(defn stop-playback!
+  "Stops playback for all jobs where that is possible (i.e. ones that have a
+   `:stop!` function)."
+  []
+  (doseq [[id {:keys [stop!] :as job}] @job-cache
+          :when stop!]
+    (stop!)
+    (update-job! id (assoc job :status :success)))
+  (refresh-alda-environment!))
 
 (defn handle-code-play
   [code {:keys [jobId] :as options}]
@@ -161,6 +171,19 @@
   [{:keys [body options]}]
   (handle-code-play body options))
 
+(defn- sanitize-score-for-json
+  "We need to convert the score (a Clojure map) into a JSON string to send as a
+   response, but certain values in the map are not serializable as JSON."
+  [score]
+  (-> score
+      ;; remove scheduled function events
+      (update :events (fn [events]
+                        (remove #(instance? alda.lisp.model.records.Function %)
+                                events)))
+      ;; remove the audio-context (an atom containing information specific to
+      ;; playing the score)
+      (dissoc :audio-context)))
+
 (defmethod process "play-status"
   [{:keys [options]}]
   (let [job-id (get options :jobId)
@@ -177,16 +200,7 @@
 
           :else
           (-> (success-response (name status))
-              ;; HACK: Clojure functions are not serializable as JSON, so we're
-              ;; just leaving them out of the returned score for now
-              (assoc :score
-                     (-> score
-                         (update :events
-                                 #(remove (fn [event]
-                                            (instance?
-                                              alda.lisp.model.records.Function
-                                              event))
-                                          %))))
+              (assoc :score (sanitize-score-for-json score))
               (assoc :pending (pending? job))))
         (assoc :jobId job-id))))
 
@@ -239,6 +253,9 @@
                "KILL"      (do
                              (log/info "Received KILL signal from server.")
                              (reset! running? false))
+               "STOP"      (do
+                             (log/info "Received STOP signal from server.")
+                             (stop-playback!))
                "HEARTBEAT" (do
                              (log/debug "Got HEARTBEAT from server.")
                              (reset! lives MAX-LIVES))

@@ -97,5 +97,5 @@
                 {:keys [success body] :as res} (json/parse-string json true)]
             (is success)))))
     (testing "should accept signals from the server"
-      (doseq [signal ["HEARTBEAT" "KILL"]]
+      (doseq [signal ["HEARTBEAT" "STOP" "KILL"]]
         (zmq/send-msg *socket* signal)))))
