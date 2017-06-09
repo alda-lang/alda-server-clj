@@ -49,11 +49,12 @@
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(def ^:const JOB_CACHE_SIZE 20)
+;; Keep information about each job in memory for 15 minutes.
+(def ^:const JOB_CACHE_TTL (* 15 60 1000))
 
 (defrecord Job [status score error stop!])
 
-(def job-cache (atom (cache/fifo-cache-factory {} :threshold JOB_CACHE_SIZE)))
+(def job-cache (atom (cache/ttl-cache-factory {} :ttl JOB_CACHE_TTL)))
 
 (defn update-job! [id job]
   "Upserts a Job record into the cache.
