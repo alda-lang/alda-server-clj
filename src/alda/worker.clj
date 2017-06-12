@@ -27,10 +27,6 @@
   (log/debug "Requiring alda.lisp...")
   (require '[alda.lisp :refer :all]))
 
-(defn refresh-alda-environment!
-  []
-  (midi/open-midi-synth!))
-
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defn- success-response
@@ -99,15 +95,14 @@
       (let [play-opts {:from     from
                        :to       to
                        :async?   true
-                       :one-off? true}
+                       :one-off? false}
             {:keys [score stop! wait]}
             (if (empty? history)
               (now/play-score! (score/score events) play-opts)
               (now/with-score* (atom history)
                 (now/play-with-opts! play-opts events)))]
         (update-job! jobId (Job. :playing score nil stop!))
-        (wait)
-        (refresh-alda-environment!))
+        (wait))
       (log/debug "Done playing score.")
       (update-job-status! jobId :success))
     (catch Throwable e
@@ -121,8 +116,7 @@
   (doseq [[id {:keys [stop!] :as job}] @job-cache
           :when stop!]
     (stop!)
-    (update-job! id (assoc job :status :success)))
-  (refresh-alda-environment!))
+    (update-job! id (assoc job :status :success))))
 
 (defn handle-code-play
   [code {:keys [jobId] :as options}]
