@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## 0.3.1 (2017-06-11)
+
+* Added support for the `stop-playback` command. When a server gets that
+  command, it sends a `STOP` signal to all known workers. Each worker then stops
+  playback immediately.
+
 ## 0.3.0 (2017-05-27)
 
 * Updates for compatibility with alda/core 0.2.0, which has a brand new parser
