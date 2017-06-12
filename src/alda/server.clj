@@ -81,6 +81,8 @@
 
 (def shutting-down-response (successful-response "Shutting down..."))
 
+(def stopping-playback-response (successful-response "Stopping playback..."))
+
 (defn status-response
   [available total backend-port]
   (successful-response
@@ -199,6 +201,11 @@
       :else
       (log/debug "Supervisor approves of the current number of workers."))))
 
+(defn stop-playback!
+  [backend]
+  (doseq [{:keys [address]} (all-workers)]
+    (zmq/send-msg backend [address "STOP"])))
+
 (defn murder-workers!
   [backend shutting-down?]
   (doseq [{:keys [address]} (all-workers)]
@@ -295,6 +302,11 @@
                          (status-response (count @available-workers)
                                           workers
                                           backend-port))
+
+             "stop-playback"
+             (do
+               (respond-to msg frontend stopping-playback-response)
+               (stop-playback! backend))
 
              "stop-server"
              (do
