@@ -49,8 +49,8 @@
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-;; Keep information about each job in memory for 15 minutes.
-(def ^:const JOB_CACHE_TTL (* 15 60 1000))
+;; Keep information about each job in memory for 2 hours.
+(def ^:const JOB_CACHE_TTL (* 2 60 60 1000))
 
 (defrecord Job [status score error stop!])
 
