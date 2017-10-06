@@ -11,6 +11,7 @@
            [org.zeromq ZMQException]))
 
 (def ^:dynamic *no-system-exit* false)
+(def ^:dynamic *disable-supervisor* false)
 
 (defn exit!
   [exit-code]
@@ -361,7 +362,8 @@
           (when (> (System/currentTimeMillis)
                    (+ @last-supervised WORKER-CHECK-INTERVAL))
             (reset! last-supervised (System/currentTimeMillis))
-            (when-not (System/getenv "ALDA_DISABLE_SUPERVISOR")
+            (when-not (or *disable-supervisor*
+                          (System/getenv "ALDA_DISABLE_SUPERVISOR"))
               (supervise-workers! backend-port workers)))
 
           ; send a heartbeat to all current workers
