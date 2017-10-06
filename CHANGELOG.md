@@ -1,5 +1,22 @@
 # CHANGELOG
 
+## 0.3.2 (2017-10-05)
+
+* Added an `alda.server/*disable-supervisor*` dynamic var that, when bound to a
+  truthy value, has the same effect as the `ALDA_DISABLE_SUPERVISOR` environment
+  variable.
+
+  I needed this in order to write a convenient development task for the
+  alda/core project. The Boot process was already running a JVM, so I couldn't
+  really set `ALDA_DISABLE_SUPERVISOR` after the fact.
+
+* Increased the number of worker lives from 10 to 30. This effectively means
+  that a worker will wait until it's been 30 seconds, not 10 seconds, since it
+  received its last heartbeat from the server before giving up and killing
+  itself. This should help with some timing issues I was seeing where the server
+  took a little longer than 10 seconds to send a worker its first heartbeat. 30
+  seconds ought to be a safer timeframe.
+
 ## 0.3.1 (2017-06-11)
 
 * Added support for the `stop-playback` command. When a server gets that
