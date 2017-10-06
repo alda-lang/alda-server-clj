@@ -209,7 +209,7 @@
 (def ^:const MAX-LIFESPAN       (* 1000 60 20)) ; 20 minutes
 (def ^:const HEARTBEAT-INTERVAL 1000)  ; 1 second
 (def ^:const SUSPENDED-INTERVAL 10000) ; 10 seconds
-(def ^:const MAX-LIVES          10)
+(def ^:const MAX-LIVES          30)
 
 (def lives (atom MAX-LIVES))
 
