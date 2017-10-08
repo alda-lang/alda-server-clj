@@ -1,5 +1,9 @@
 # CHANGELOG
 
+## 0.3.3 (2017-10-07)
+
+* Added support for an "events" option to the "parse" command.
+
 ## 0.3.2 (2017-10-05)
 
 * Added an `alda.server/*disable-supervisor*` dynamic var that, when bound to a

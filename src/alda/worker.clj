@@ -32,7 +32,7 @@
 (defn- success-response
   [body]
   {:success true
-   :body    (if (map? body)
+   :body    (if (or (map? body) (sequential? body))
               (json/generate-string body)
               body)})
 
@@ -134,10 +134,13 @@
       (assoc :jobId jobId)))
 
 (defn handle-code-parse
-  [code]
+  [code {:keys [output] :as options}]
   (try
     (require '[alda.lisp :refer :all])
-    (success-response (parse-input code))
+    (let [output (case output
+                   ("data" nil) :score
+                   "events"     :events-or-error)]
+      (success-response (parse-input code :output output)))
     (catch Throwable e
       (log/error e e)
       (error-response e))))
@@ -156,7 +159,7 @@
 
 (defmethod process "parse"
   [{:keys [body options]}]
-  (handle-code-parse body))
+  (handle-code-parse body options))
 
 (defmethod process "ping"
   [_]
