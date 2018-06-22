@@ -1,8 +1,7 @@
 (set-env!
   :source-paths #{"src" "test"}
   :dependencies
-  '[
-    ; dev
+  '[; dev
     [adzerk/bootlaces      "0.1.13" :scope "test"]
     [alda/core             "0.3.0"  :scope "test"]
     [adzerk/boot-test      "1.2.0"  :scope "test"]
@@ -13,13 +12,12 @@
     [cheshire               "5.7.1"]
     [io.djy/ezzmq           "0.5.3"]
     [me.raynes/conch        "0.8.0"]
-    [org.clojure/core.cache "0.6.5"]
-   ])
+    [org.clojure/core.cache "0.6.5"]])
 
 (require '[adzerk.bootlaces :refer :all]
          '[adzerk.boot-test :refer :all])
 
-(def ^:const +version+ "0.3.3")
+(def ^:const +version+ "0.4.0")
 
 (bootlaces! +version+)
 
@@ -72,9 +70,9 @@
                              (require 'alda.server)
                              (require 'alda.util)
                              ((resolve 'alda.server/start-server!)
-                                (or workers 2)
-                                (or port 27713)
-                                true))
+                              (or workers 2)
+                              (or port 27713)
+                              true))
             start-worker!  (fn []
                              (assert port
                                "The --port option is mandatory for workers.")
