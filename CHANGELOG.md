@@ -1,5 +1,10 @@
 # CHANGELOG
 
+## 0.4.0 (2018-06-22)
+
+* Removed a stale reference to scheduled functions, [for compatibility with
+  alda/core 0.4.0](https://github.com/alda-lang/alda-core/pull/65).
+
 ## 0.3.3 (2017-10-07)
 
 * Added support for an "events" option to the "parse" command.

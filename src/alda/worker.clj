@@ -173,10 +173,6 @@
    response, but certain values in the map are not serializable as JSON."
   [score]
   (-> score
-      ;; remove scheduled function events
-      (update :events (fn [events]
-                        (remove #(instance? alda.lisp.model.records.Function %)
-                                events)))
       ;; remove the audio-context (an atom containing information specific to
       ;; playing the score)
       (dissoc :audio-context)))
@@ -244,49 +240,49 @@
          (do
            (cond
            ; the server sends 1-frame messages as signals
-           (= 1 (count msg))
-           (let [signal (-> msg first (String.))]
-             (case signal
-               "KILL"      (do
-                             (log/info "Received KILL signal from server.")
-                             (reset! running? false))
-               "STOP"      (do
-                             (log/info "Received STOP signal from server.")
-                             (stop-playback!))
-               "HEARTBEAT" (do
-                             (log/debug "Got HEARTBEAT from server.")
-                             (reset! lives MAX-LIVES))
-               (log/errorf "Invalid signal: %s" signal)))
+            (= 1 (count msg))
+            (let [signal (-> msg first (String.))]
+              (case signal
+                "KILL"      (do
+                              (log/info "Received KILL signal from server.")
+                              (reset! running? false))
+                "STOP"      (do
+                              (log/info "Received STOP signal from server.")
+                              (stop-playback!))
+                "HEARTBEAT" (do
+                              (log/debug "Got HEARTBEAT from server.")
+                              (reset! lives MAX-LIVES))
+                (log/errorf "Invalid signal: %s" signal)))
 
            ; the server also forwards 3-frame messages from the client
            ; Frames:
            ;   1) the return address of the client
            ;   2) a JSON string representing the client's request
            ;   3) the command as a string (for use by the server)
-           (= 3 (count msg))
-           (let [[return-address body command] msg
-                 body    (String. body)
-                 command (String. command)]
-             (try
-               (when (and (not (available?))
-                          (not= "play-status" command))
-                 (log/debugf "Rejecting message (command: %s). I'm busy." command)
-                 (throw (Exception. "The requested worker is not available.")))
-               (log/debugf "Processing message... (command: %s)" command)
-               (let [req (json/parse-string body true)
-                     res (json/generate-string (process req))]
-                 (log/debug "Sending response...")
-                 (zmq/send-msg socket [return-address "" res])
-                 (log/debug "Response sent."))
-               (catch Throwable e
-                 (log/error e e)
-                 (log/info "Sending error response...")
-                 (let [err (json/generate-string (error-response e))]
-                   (zmq/send-msg socket [return-address "" err]))
-                 (log/info "Error response sent."))))
+            (= 3 (count msg))
+            (let [[return-address body command] msg
+                  body    (String. body)
+                  command (String. command)]
+              (try
+                (when (and (not (available?))
+                           (not= "play-status" command))
+                  (log/debugf "Rejecting message (command: %s). I'm busy." command)
+                  (throw (Exception. "The requested worker is not available.")))
+                (log/debugf "Processing message... (command: %s)" command)
+                (let [req (json/parse-string body true)
+                      res (json/generate-string (process req))]
+                  (log/debug "Sending response...")
+                  (zmq/send-msg socket [return-address "" res])
+                  (log/debug "Response sent."))
+                (catch Throwable e
+                  (log/error e e)
+                  (log/info "Sending error response...")
+                  (let [err (json/generate-string (error-response e))]
+                    (zmq/send-msg socket [return-address "" err]))
+                  (log/info "Error response sent."))))
 
-           :else
-           (log/errorf "Invalid message: %s" (mapv #(String. %) msg))))]
+            :else
+            (log/errorf "Invalid message: %s" (mapv #(String. %) msg))))]
 
         (while (and (zmq/polling?) @running?)
           (let [now      (System/currentTimeMillis)
