@@ -23,6 +23,7 @@
 (defn start-alda-environment!
   []
   (midi/open-midi-synth!)
+  (midi/open-midi-sequencer!)
   (log/debug "Requiring alda.lisp...")
   (require '[alda.lisp :refer :all]))
 
