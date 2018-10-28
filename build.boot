@@ -3,9 +3,9 @@
   :dependencies
   '[; dev
     [adzerk/bootlaces      "0.1.13" :scope "test"]
-    [alda/core             "0.3.0"  :scope "test"]
     [adzerk/boot-test      "1.2.0"  :scope "test"]
-    [alda/sound-engine-clj "0.3.0"  :scope "test"]
+    [alda/core             "LATEST" :scope "test"]
+    [alda/sound-engine-clj "LATEST" :scope "test"]
 
     ; server / worker
     [com.taoensso/timbre    "4.10.0" :exclusions [org.clojure/clojure]]
