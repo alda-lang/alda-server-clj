@@ -22,8 +22,8 @@
 
 (defn start-alda-environment!
   []
-  (sound/start-synthesis-engine!)
   (midi/open-midi-synth!)
+  (midi/open-midi-sequencer!)
   (log/debug "Requiring alda.lisp...")
   (require '[alda.lisp :refer :all]))
 
