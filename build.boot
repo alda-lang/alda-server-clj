@@ -17,7 +17,7 @@
 (require '[adzerk.bootlaces :refer :all]
          '[adzerk.boot-test :refer :all])
 
-(def ^:const +version+ "0.4.0")
+(def ^:const +version+ "0.4.1")
 
 (bootlaces! +version+)
 

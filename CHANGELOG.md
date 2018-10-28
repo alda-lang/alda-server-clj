@@ -1,5 +1,15 @@
 # CHANGELOG
 
+## 0.4.1 (2018-10-28)
+
+* Updates to support alda/sound-engine-clj 1.0.0, which now uses a Java MIDI
+  Sequencer instead of JSyn to do event scheduling:
+
+  * Removed call to `alda.sound/start-synthesis-engine!`, which has been
+    removed.
+
+  * Added a call to `midi/open-midi-sequencer!` when starting a worker process.
+
 ## 0.4.0 (2018-06-22)
 
 * Removed a stale reference to scheduled functions, [for compatibility with
