@@ -1,5 +1,10 @@
 # CHANGELOG
 
+## 0.4.2 (2019-01-19)
+
+* Add support for an `instruments` command, which returns a list of available
+  instruments.
+
 ## 0.4.1 (2018-10-28)
 
 * Updates to support alda/sound-engine-clj 1.0.0, which now uses a Java MIDI

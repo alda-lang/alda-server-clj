@@ -1,16 +1,17 @@
 (ns alda.worker
-  (:require [alda.now           :as    now]
-            [alda.parser        :refer (parse-input)]
-            [alda.lisp.score    :as    score]
-            [alda.sound         :as    sound]
-            [alda.sound.midi    :as    midi]
-            [alda.util          :as    util]
-            [alda.version       :refer (-version-)]
-            [cheshire.core      :as    json]
-            [clojure.core.cache :as    cache]
-            [clojure.pprint     :refer (pprint)]
-            [taoensso.timbre    :as    log]
-            [ezzmq.core         :as    zmq]))
+  (:require [alda.now                   :as    now]
+            [alda.parser                :refer (parse-input)]
+            [alda.lisp.instruments.midi :refer (instruments)]
+            [alda.lisp.score            :as    score]
+            [alda.sound                 :as    sound]
+            [alda.sound.midi            :as    midi]
+            [alda.util                  :as    util]
+            [alda.version               :refer (-version-)]
+            [cheshire.core              :as    json]
+            [clojure.core.cache         :as    cache]
+            [clojure.pprint             :refer (pprint)]
+            [taoensso.timbre            :as    log]
+            [ezzmq.core                 :as    zmq]))
 
 (def ^:dynamic *no-system-exit* false)
 
@@ -201,6 +202,11 @@
 (defmethod process "version"
   [_]
   (success-response -version-))
+
+(defmethod process "instruments"
+  [_]
+  (-> (success-response "OK")
+      (assoc :instruments (map first instruments))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
