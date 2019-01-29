@@ -1,6 +1,5 @@
 (ns alda.worker
-  (:require [alda.now                   :as    now]
-            [alda.parser                :refer (parse-input)]
+  (:require [alda.parser                :refer (parse-input)]
             [alda.lisp.instruments.midi :refer (instruments)]
             [alda.lisp.score            :as    score]
             [alda.sound                 :as    sound]
@@ -9,7 +8,7 @@
             [alda.version               :refer (-version-)]
             [cheshire.core              :as    json]
             [clojure.core.cache         :as    cache]
-            [clojure.pprint             :refer (pprint)]
+            [clojure.set                :as    set]
             [taoensso.timbre            :as    log]
             [ezzmq.core                 :as    zmq]))
 
@@ -88,22 +87,31 @@
   (try
     (log/debugf "Starting job %s..." jobId)
     (update-job! jobId (Job. :parsing nil nil nil))
-    (let [_       (log/debug "Parsing body...")
-          events  (parse-input code :output :events-or-error)
-          _       (log/debug "Parsing history...")
-          history (when history (parse-input history))]
-      (log/debug "Playing score...")
-      (let [play-opts {:from     from
-                       :to       to
-                       :async?   true
-                       :one-off? false}
-            {:keys [score stop! wait]}
-            (if (empty? history)
-              (now/play-score! (score/score events) play-opts)
-              (now/with-score* (atom history)
-                (now/play-with-opts! play-opts events)))]
-        (update-job! jobId (Job. :playing score nil stop!))
-        (wait))
+    (let [events  (do
+                    (log/debug "Parsing body...")
+                    (parse-input code :output :events-or-error))
+          history (when history
+                    (log/debug "Parsing history...")
+                    (parse-input history))
+          score   (do
+                    (log/debug "Constructing score...")
+                    (apply score/continue
+                           (or history (score/new-score))
+                           events))
+
+          {:keys [score stop! wait]}
+          (do
+            (log/debug "Playing score...")
+            (sound/with-play-opts {:from     from
+                                   :to       to
+                                   :async?   true
+                                   :one-off? false}
+              (sound/play!
+                score
+                (when (seq (:events history))
+                  (set/difference (:events score) (:events history))))))]
+      (update-job! jobId (Job. :playing score nil stop!))
+      (wait)
       (log/debug "Done playing score.")
       (update-job-status! jobId :success))
     (catch Throwable e

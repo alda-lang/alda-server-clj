@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## 0.4.3 (2019-01-28)
+
+* Refactored to remove dependency on the `alda.now` namespace, which is being
+  removed from `alda/sound-engine-clj`. We can achieve the same functionality in
+  `alda/server-clj` by using `alda.sound` directly.
+
 ## 0.4.2 (2019-01-19)
 
 * Add support for an `instruments` command, which returns a list of available
