@@ -5,7 +5,11 @@
             [alda.server   :as    server]
             [alda.util     :as    util]
             [alda.version  :refer (-version-)]
-            [alda.zmq-util :refer (find-open-port)]))
+            [alda.zmq-util :refer (find-open-port)])
+  (:import [java.io File]
+           [java.nio.file Files Paths]
+           [java.nio.file.attribute FileAttribute]
+           [javax.sound.midi MidiSystem Sequence]))
 
 (def ^:dynamic *frontend-port*   nil)
 (def ^:dynamic *backend-port*    nil)
@@ -32,6 +36,12 @@
   [(json/generate-string {:command "play-status" :options {:jobId job-id}})
    worker-address
    "play-status"])
+
+(defn export-status-request
+  [worker-address job-id]
+  [(json/generate-string {:command "export-status" :options {:jobId job-id}})
+   worker-address
+   "export-status"])
 
 (defn response-for-msg
   [msg]
@@ -119,21 +129,22 @@
       (let [req {:command "parse" :body "piano: c"}
             {:keys [success body]} (response-for req)]
         (testing "should get a successful response containing a score map"
-          (is success)
+          (is success body)
           (let [score-map (json/parse-string body true)]
             (is (contains? score-map :events))
             (is (contains? score-map :instruments))))))
     (wait-for-a-worker)
-    ; forcing parsing to take at least 2 seconds for play-status test below
     (let [job-id (generate-job-id)
           req {:command "play"
+               ;; forcing parsing to take at least 2 seconds for play-status
+               ;; test below
                :body    "piano: (Thread/sleep 2000) (vol 0) c2"
                :options {:jobId job-id}}
           [_ json worker-address] (complete-response-for req)
           {:keys [success body jobId]} (json/parse-string (String. json) true)]
       (testing "the play command"
         (testing "should get a successful response"
-          (is success)
+          (is success body)
           (testing "that includes the address of the worker playing the score"
             (is (not (nil? worker-address))))
           (testing "that includes the correct job ID"
@@ -144,13 +155,102 @@
         (let [req (play-status-request worker-address job-id)
               {:keys [success pending body jobId]} (response-for-msg req)]
           (testing "should get a successful response"
-            (is success)
+            (is success body)
             (testing "that includes the correct job ID"
               (is (= job-id jobId))))
           (testing "should say the status is 'parsing' while the worker is parsing"
             (is (= "parsing" body))
             (testing "and 'pending' should be true"
-              (is pending))))))
+              (is pending)))
+          (testing "should indicate success once playback completes"
+            (let [timeout 5000
+                  start   (System/currentTimeMillis)]
+              (loop []
+                (let [now (System/currentTimeMillis)
+                      req (play-status-request worker-address job-id)
+                      {:keys [success pending body]} (response-for-msg req)]
+                  (cond
+                    (not success)
+                    (is false body)
+
+                    (= "success" body)
+                    (is (not pending) body)
+
+                    (-> now (- start) (> timeout))
+                    (is false "Timeout exceeded.")
+
+                    :else
+                    (do (Thread/sleep 100) (recur))))))))))
+
+    (wait-for-a-worker)
+    (let [job-id   (generate-job-id)
+          tmp-dir  (Files/createTempDirectory
+                     "alda-server-test"
+                     (into-array FileAttribute []))
+          filename (-> tmp-dir
+                       .toString
+                       (Paths/get (into-array String [job-id]))
+                       .toAbsolutePath
+                       (str ".mid"))
+          req      {:command "export"
+                    ;; forcing parsing to take at least 2 seconds for
+                    ;; export-status test below
+                    :body    "piano: (Thread/sleep 2000) (vol 0) c2"
+                    :options {:jobId job-id
+                              :filename filename}}
+          [_ json worker-address]      (complete-response-for req)
+          {:keys [success body jobId]} (json/parse-string (String. json) true)]
+      (testing "the export command"
+        (testing "should get a successful response"
+          (is success body)
+          (testing "that includes the address of the worker"
+            (is (not (nil? worker-address))))
+          (testing "that includes the correct job ID"
+            (is (= job-id jobId)))))
+      ;; TIMING: wait briefly to ensure the worker has started working
+      (Thread/sleep 250)
+      (testing "the export-status command"
+        (let [req (export-status-request worker-address job-id)
+              {:keys [success pending body jobId]} (response-for-msg req)]
+          (testing "should get a successful response"
+            (is success body)
+            (testing "that includes the correct job ID"
+              (is (= job-id jobId))))
+          (testing "should say the status is 'parsing' while the worker is parsing"
+            (is (= "parsing" body))
+            (testing "and 'pending' should be true"
+              (is pending)))
+          (testing "should indicate success once the export completes"
+            (let [timeout 5000
+                  start   (System/currentTimeMillis)]
+              (loop []
+                (let [now (System/currentTimeMillis)
+                      req (export-status-request worker-address job-id)
+                      {:keys [success pending body]} (response-for-msg req)]
+                  (cond
+                    (not success)
+                    (is false body)
+
+                    (= "success" body)
+                    (is (not pending) body)
+
+                    (-> now (- start) (> timeout))
+                    (is false "Timeout exceeded.")
+
+                    :else
+                    (do (Thread/sleep 100) (recur)))))))))
+      (testing "the exported MIDI file"
+        (let [file (File. filename)]
+          (testing "exists"
+            (is (.exists file) (format "%s doesn't exist" filename)))
+          (testing "is a MIDI file"
+            (let [sqnc (MidiSystem/getSequence file)]
+              (is (instance? Sequence sqnc) (type sqnc))
+              (testing "with the expected division type and resolution"
+                (let [division-type (.getDivisionType sqnc)]
+                  (is (= Sequence/PPQ division-type) division-type))
+                (let [resolution (.getResolution sqnc)]
+                  (is (= 128 resolution) resolution))))))))
     (testing "the 'stop-server' command"
       (let [req {:command "stop-server"}]
         (testing "gets a successful response"

@@ -1,5 +1,9 @@
 # CHANGELOG
 
+## 0.4.4 (2019-04-11)
+
+* Added support for MIDI `export` and `export-status` commands.
+
 ## 0.4.3 (2019-01-28)
 
 * Refactored to remove dependency on the `alda.now` namespace, which is being

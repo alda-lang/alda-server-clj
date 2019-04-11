@@ -76,13 +76,13 @@
 
 (defn pending?
   [{:keys [status] :as job}]
-  (not (#{:success :error :playing} status)))
+  (not (#{:success :error :playing :exporting} status)))
 
 (defn available?
   []
-  (not-any? #(#{:parsing :playing} (:status %)) (vals @job-cache)))
+  (not-any? #(#{:parsing :playing :exporting} (:status %)) (vals @job-cache)))
 
-(defn run-job!
+(defn run-play-job!
   [code {:keys [history from to jobId]}]
   (try
     (log/debugf "Starting job %s..." jobId)
@@ -118,6 +118,22 @@
       (log/error e e)
       (update-job! jobId (Job. :error nil e nil)))))
 
+(defn run-export-job!
+  [code {:keys [jobId filename]}]
+  (try
+    (log/debugf "Starting job %s..." jobId)
+    (update-job! jobId (Job. :parsing nil nil nil))
+    (log/debug "Parsing score...")
+    (let [score (parse-input code)]
+      (update-job! jobId (Job. :exporting score nil nil))
+      (log/debugf "Exporting score to %s..." filename)
+      (sound/export! score filename)
+      (log/debug "Done exporting score.")
+      (update-job-status! jobId :success))
+    (catch Throwable e
+      (log/error e e)
+      (update-job! jobId (Job. :error nil e nil)))))
+
 (defn stop-playback!
   "Stops playback for all jobs where that is possible (i.e. ones that have a
    `:stop!` function)."
@@ -138,7 +154,22 @@
 
         :else
         (do
-          (future (run-job! code options))
+          (future (run-play-job! code options))
+          (success-response "Request received.")))
+      (assoc :jobId jobId)))
+
+(defn handle-code-export
+  [code {:keys [jobId filename] :as options}]
+  (-> (cond
+        (empty? jobId)
+        (error-response "Request missing a `jobId` option.")
+
+        (get @job-cache jobId)
+        (success-response "Already exporting that score.")
+
+        :else
+        (do
+          (future (run-export-job! code options))
           (success-response "Request received.")))
       (assoc :jobId jobId)))
 
@@ -178,6 +209,10 @@
   [{:keys [body options]}]
   (handle-code-play body options))
 
+(defmethod process "export"
+  [{:keys [body options]}]
+  (handle-code-export body options))
+
 (defn- sanitize-score-for-json
   "We need to convert the score (a Clojure map) into a JSON string to send as a
    response, but certain values in the map are not serializable as JSON."
@@ -187,7 +222,7 @@
       ;; playing the score)
       (dissoc :audio-context)))
 
-(defmethod process "play-status"
+(defn job-status
   [{:keys [options]}]
   (let [job-id (get options :jobId)
         {:keys [status score error] :as job} (get @job-cache job-id)]
@@ -206,6 +241,14 @@
               (assoc :score (sanitize-score-for-json score))
               (assoc :pending (pending? job))))
         (assoc :jobId job-id))))
+
+(defmethod process "play-status"
+  [msg]
+  (job-status msg))
+
+(defmethod process "export-status"
+  [msg]
+  (job-status msg))
 
 (defmethod process "version"
   [_]
@@ -280,7 +323,7 @@
                   command (String. command)]
               (try
                 (when (and (not (available?))
-                           (not= "play-status" command))
+                           (not (#{"play-status" "export-status"} command)))
                   (log/debugf "Rejecting message (command: %s). I'm busy." command)
                   (throw (Exception. "The requested worker is not available.")))
                 (log/debugf "Processing message... (command: %s)" command)

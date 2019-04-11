@@ -4,7 +4,9 @@
             [ezzmq.core    :as    zmq]
             [alda.worker   :as    worker]
             [alda.zmq-util :refer (find-open-port)]
-            [alda.version  :refer (-version-)]))
+            [alda.version  :refer (-version-)])
+  (:import [java.nio.file Files Paths]
+           [java.nio.file.attribute FileAttribute]))
 
 (def ^:dynamic *port*   nil)
 (def ^:dynamic *socket* nil)
@@ -80,7 +82,7 @@
                    :body "piano: c8 d e f g2"}
               [_ _ json :as res] (response-for req)
               {:keys [success body]} (json/parse-string json true)]
-          (is success)))
+          (is success body)))
       (let [job-id (generate-job-id)]
         (testing "a 'play' command"
           (let [req {:command "play"
@@ -88,14 +90,37 @@
                      :options {:jobId job-id}}
                 [_ _ json] (response-for req)
                 {:keys [success body]} (json/parse-string json true)]
-            (is success)))
+            (is success body)))
         ;; TIMING: give the worker time to start processing the job
         (Thread/sleep 1000)
         (testing "a 'play-status' command"
           (let [req {:command "play-status" :options {:jobId job-id}}
                 [_ _ json] (response-for req)
                 {:keys [success body] :as res} (json/parse-string json true)]
-            (is success)))))
+            (is success body))))
+      (let [job-id (generate-job-id)]
+        (testing "an 'export' command"
+          (let [tmp-dir  (Files/createTempDirectory
+                           "alda-worker-test"
+                           (into-array FileAttribute []))
+                filename (-> tmp-dir
+                             .toString
+                             (Paths/get (into-array String [job-id]))
+                             .toAbsolutePath
+                             (str ".mid"))
+                req {:command "export"
+                     :body    "piano: (vol 0) c2"
+                     :options {:jobId job-id, :filename filename}}
+                [_ _ json]             (response-for req)
+                {:keys [success body]} (json/parse-string json true)]
+            (is success body)))
+        ;; TIMING: give the worker time to start processing the job
+        (Thread/sleep 1000)
+        (testing "an 'export-status' command"
+          (let [req {:command "export-status" :options {:jobId job-id}}
+                [_ _ json] (response-for req)
+                {:keys [success body] :as res} (json/parse-string json true)]
+            (is success body)))))
     (testing "should accept signals from the server"
       (doseq [signal ["HEARTBEAT" "STOP" "KILL"]]
         (zmq/send-msg *socket* signal)))))
