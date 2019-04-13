@@ -292,7 +292,7 @@
              "ping"
              (respond-to msg frontend pong-response)
 
-             ("play-status" "export-status")
+             ("play-status" "job-status")
              (let [[client-address request address] msg]
                (log/debugf "Forwarding message to worker %s..."
                            (friendly-id address))

@@ -37,11 +37,11 @@
    worker-address
    "play-status"])
 
-(defn export-status-request
+(defn job-status-request
   [worker-address job-id]
-  [(json/generate-string {:command "export-status" :options {:jobId job-id}})
+  [(json/generate-string {:command "job-status" :options {:jobId job-id}})
    worker-address
-   "export-status"])
+   "job-status"])
 
 (defn response-for-msg
   [msg]
@@ -194,7 +194,7 @@
                        (str ".mid"))
           req      {:command "export"
                     ;; forcing parsing to take at least 2 seconds for
-                    ;; export-status test below
+                    ;; job-status test below
                     :body    "piano: (Thread/sleep 2000) (vol 0) c2"
                     :options {:jobId job-id
                               :filename filename}}
@@ -209,8 +209,8 @@
             (is (= job-id jobId)))))
       ;; TIMING: wait briefly to ensure the worker has started working
       (Thread/sleep 250)
-      (testing "the export-status command"
-        (let [req (export-status-request worker-address job-id)
+      (testing "the job-status command"
+        (let [req (job-status-request worker-address job-id)
               {:keys [success pending body jobId]} (response-for-msg req)]
           (testing "should get a successful response"
             (is success body)
@@ -225,7 +225,7 @@
                   start   (System/currentTimeMillis)]
               (loop []
                 (let [now (System/currentTimeMillis)
-                      req (export-status-request worker-address job-id)
+                      req (job-status-request worker-address job-id)
                       {:keys [success pending body]} (response-for-msg req)]
                   (cond
                     (not success)

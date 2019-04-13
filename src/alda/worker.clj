@@ -246,7 +246,7 @@
   [msg]
   (job-status msg))
 
-(defmethod process "export-status"
+(defmethod process "job-status"
   [msg]
   (job-status msg))
 
@@ -323,7 +323,7 @@
                   command (String. command)]
               (try
                 (when (and (not (available?))
-                           (not (#{"play-status" "export-status"} command)))
+                           (not (#{"play-status" "job-status"} command)))
                   (log/debugf "Rejecting message (command: %s). I'm busy." command)
                   (throw (Exception. "The requested worker is not available.")))
                 (log/debugf "Processing message... (command: %s)" command)

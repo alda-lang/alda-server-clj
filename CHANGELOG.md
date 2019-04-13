@@ -1,5 +1,15 @@
 # CHANGELOG
 
+## 0.5.0 (2019-04-13)
+
+* Renamed (not yet used in an Alda release) `export-status` command to
+  `job-status`.
+
+  I've convinced myself at this point that it's equivalent to the `play-status`
+  command, so `play-status` is just a supported synonym at this point. In the
+  next release of Alda, the client will send a `job-status` request for both
+  `play` and `export` jobs.
+
 ## 0.4.4 (2019-04-11)
 
 * Added support for MIDI `export` and `export-status` commands.

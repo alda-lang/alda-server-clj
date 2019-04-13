@@ -116,8 +116,8 @@
             (is success body)))
         ;; TIMING: give the worker time to start processing the job
         (Thread/sleep 1000)
-        (testing "an 'export-status' command"
-          (let [req {:command "export-status" :options {:jobId job-id}}
+        (testing "a 'job-status' command"
+          (let [req {:command "job-status" :options {:jobId job-id}}
                 [_ _ json] (response-for req)
                 {:keys [success body] :as res} (json/parse-string json true)]
             (is success body)))))
