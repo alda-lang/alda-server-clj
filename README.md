@@ -1,5 +1,7 @@
 # alda-server-clj
 
+> **NOTE:** This was a component of Alda 1.x. It is no longer in use.
+
 A Clojure implementation of an [Alda](https://github.com/alda-lang/alda) server.
 
 ## Roles
